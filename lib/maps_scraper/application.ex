@@ -9,11 +9,12 @@ defmodule MapsScraper.Application do
   def start(_type, _args) do
     children = [
       MapsScraperWeb.Telemetry,
-      MapsScraper.Repo,
       {DNSCluster, query: Application.get_env(:maps_scraper, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: MapsScraper.PubSub},
-      # Start a worker by calling: MapsScraper.Worker.start_link(arg)
-      # {MapsScraper.Worker, arg},
+      # Task yang menjalankan tiap baris validasi. Dipisah dari antrean supaya
+      # task yang mati tidak ikut menjatuhkan antreannya.
+      {Task.Supervisor, name: MapsScraper.Validation.TaskSupervisor},
+      MapsScraper.Validation.Queue,
       # Start to serve requests, typically the last entry
       MapsScraperWeb.Endpoint
     ]
