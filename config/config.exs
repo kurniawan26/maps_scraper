@@ -7,56 +7,27 @@
 # General application configuration
 import Config
 
-config :maps_scraper,
-  ecto_repos: [MapsScraper.Repo],
-  generators: [timestamp_type: :utc_datetime]
-
 # Configure the endpoint
 config :maps_scraper, MapsScraperWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
-  render_errors: [
-    formats: [html: MapsScraperWeb.ErrorHTML, json: MapsScraperWeb.ErrorJSON],
-    layout: false
-  ],
-  pubsub_server: MapsScraper.PubSub,
-  live_view: [signing_salt: "R+l2bRpd"]
+  render_errors: [formats: [json: MapsScraperWeb.ErrorJSON], layout: false],
+  pubsub_server: MapsScraper.PubSub
 
-# Configure LiveView
-config :phoenix_live_view,
-  # the attribute set on all root tags. Used for Phoenix.LiveView.ColocatedCSS.
-  root_tag_attribute: "phx-r"
+# Sidecar Playwright yang melakukan scraping Google Maps (lihat docker-compose.yml)
+config :maps_scraper, :scraper,
+  base_url: "http://localhost:3000",
+  timeout: 45_000
 
-# Configure the mailer
-#
-# By default it uses the "Local" adapter which stores the emails
-# locally. You can see the emails in your browser, at "/dev/mailbox".
-#
-# For production it's recommended to configure a different adapter
-# at the `config/runtime.exs`.
-config :maps_scraper, MapsScraper.Mailer, adapter: Swoosh.Adapters.Local
-
-# Configure esbuild (the version is required)
-config :esbuild,
-  version: "0.25.4",
-  maps_scraper: [
-    args:
-      ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
-    cd: Path.expand("../assets", __DIR__),
-    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
-  ]
-
-# Configure tailwind (the version is required)
-config :tailwind,
-  version: "4.3.0",
-  maps_scraper: [
-    args: ~w(
-      --input=assets/css/app.css
-      --output=priv/static/assets/css/app.css
-    ),
-    cd: Path.expand("..", __DIR__),
-    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
-  ]
+# Antrean validasi massal (MapsScraper.Validation.Queue)
+config :maps_scraper, :validation,
+  # berapa query diproses bersamaan; jangan melebihi kapasitas sidecar
+  concurrency: 3,
+  # termasuk percobaan pertama, jadi 3 berarti 1 kali jalan + 2 kali ulang
+  max_attempts: 3,
+  backoff_ms: 1_000,
+  max_backoff_ms: 30_000,
+  max_batch: 500
 
 # Configure Elixir's Logger
 config :logger, :default_formatter,

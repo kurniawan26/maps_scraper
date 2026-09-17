@@ -1,18 +1,5 @@
 import Config
 
-# Configure your database
-#
-# The MIX_TEST_PARTITION environment variable can be used
-# to provide built-in test partitioning in CI environment.
-# Run `mix help test` for more information.
-config :maps_scraper, MapsScraper.Repo,
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
-  database: "maps_scraper_test#{System.get_env("MIX_TEST_PARTITION")}",
-  pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2
-
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
 config :maps_scraper, MapsScraperWeb.Endpoint,
@@ -20,21 +7,27 @@ config :maps_scraper, MapsScraperWeb.Endpoint,
   secret_key_base: "2kOnIk+rMVfTVQ36Akv/b3+Ql0QZYIS4bBx32dogzcCQrzqtUxIEXak7POMPwhjS",
   server: false
 
-# In test we don't send emails
-config :maps_scraper, MapsScraper.Mailer, adapter: Swoosh.Adapters.Test
+# Test tidak boleh menyentuh sidecar sungguhan; Req dialihkan ke stub.
+config :maps_scraper, :scraper,
+  base_url: "http://sidecar.test",
+  timeout: 5_000,
+  req_options: [plug: {Req.Test, MapsScraper.Maps.Client}]
 
-# Disable swoosh api client as it is only required for production adapters
-config :swoosh, :api_client, false
+# Antrean diuji tanpa sidecar: lookup diarahkan ke stub, dan jeda retry
+# dipendekkan supaya test tidak perlu menunggu lama.
+config :maps_scraper, :validation,
+  concurrency: 2,
+  max_attempts: 3,
+  backoff_ms: 5,
+  max_backoff_ms: 20,
+  max_batch: 10,
+  lookup: MapsScraper.ValidationStub
 
 # Print only warnings and errors during test
 config :logger, level: :warning
 
 # Initialize plugs at runtime for faster test compilation
 config :phoenix, :plug_init_mode, :runtime
-
-# Enable helpful, but potentially expensive runtime checks
-config :phoenix_live_view,
-  enable_expensive_runtime_checks: true
 
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,

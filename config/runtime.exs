@@ -16,6 +16,42 @@ import Config
 #
 # Alternatively, you can use `mix phx.gen.release` to generate a `bin/server`
 # script that automatically sets the env var above.
+# Alamat sidecar scraper dapat ditimpa lewat environment, misalnya saat Phoenix
+# ikut dijalankan di dalam Docker (SCRAPER_URL=http://scraper:3000). Sama seperti
+# di atas, hanya kunci yang benar-benar diisi yang ditimpa.
+scraper_overrides =
+  [
+    base_url: System.get_env("SCRAPER_URL"),
+    timeout:
+      System.get_env("SCRAPER_TIMEOUT_MS") &&
+        String.to_integer(System.get_env("SCRAPER_TIMEOUT_MS"))
+  ]
+  |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+
+if scraper_overrides != [] do
+  config :maps_scraper, :scraper, scraper_overrides
+end
+
+# Antrean validasi massal dapat disetel per-deployment tanpa rebuild.
+#
+# Berkas ini dievaluasi untuk SEMUA environment, termasuk test. Karena itu hanya
+# kunci yang environment variable-nya benar-benar diisi yang ditimpa — kalau tidak,
+# nilai dari config/test.exs akan tergilas dan test kehilangan setelannya.
+validation_overrides =
+  [
+    concurrency: System.get_env("VALIDATION_CONCURRENCY"),
+    max_attempts: System.get_env("VALIDATION_MAX_ATTEMPTS"),
+    backoff_ms: System.get_env("VALIDATION_BACKOFF_MS"),
+    max_backoff_ms: System.get_env("VALIDATION_MAX_BACKOFF_MS"),
+    max_batch: System.get_env("VALIDATION_MAX_BATCH")
+  ]
+  |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+  |> Enum.map(fn {key, value} -> {key, String.to_integer(value)} end)
+
+if validation_overrides != [] do
+  config :maps_scraper, :validation, validation_overrides
+end
+
 if System.get_env("PHX_SERVER") do
   config :maps_scraper, MapsScraperWeb.Endpoint, server: true
 end
@@ -24,23 +60,6 @@ config :maps_scraper, MapsScraperWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
 if config_env() == :prod do
-  database_url =
-    System.get_env("DATABASE_URL") ||
-      raise """
-      environment variable DATABASE_URL is missing.
-      For example: ecto://USER:PASS@HOST/DATABASE
-      """
-
-  maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
-
-  config :maps_scraper, MapsScraper.Repo,
-    # ssl: true,
-    url: database_url,
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
-    # For machines with several cores, consider starting multiple pools of `pool_size`
-    # pool_count: 4,
-    socket_options: maybe_ipv6
-
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you
   # want to use a different value for prod and you most likely don't want
@@ -99,22 +118,4 @@ if config_env() == :prod do
   #       force_ssl: [hsts: true]
   #
   # Check `Plug.SSL` for all available options in `force_ssl`.
-
-  # ## Configuring the mailer
-  #
-  # In production you need to configure the mailer to use a different adapter.
-  # Here is an example configuration for Mailgun:
-  #
-  #     config :maps_scraper, MapsScraper.Mailer,
-  #       adapter: Swoosh.Adapters.Mailgun,
-  #       api_key: System.get_env("MAILGUN_API_KEY"),
-  #       domain: System.get_env("MAILGUN_DOMAIN")
-  #
-  # Most non-SMTP adapters require an API client. Swoosh supports Req, Hackney,
-  # and Finch out-of-the-box. This configuration is typically done at
-  # compile-time in your config/prod.exs:
-  #
-  #     config :swoosh, :api_client, Swoosh.ApiClient.Req
-  #
-  # See https://swoosh.hexdocs.pm/Swoosh.html#module-installation for details.
 end
