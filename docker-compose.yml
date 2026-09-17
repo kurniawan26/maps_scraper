@@ -1,0 +1,28 @@
+services:
+  scraper:
+    build:
+      context: ./scraper
+    image: maps-scraper-sidecar:latest
+    container_name: maps_scraper_playwright
+    restart: unless-stopped
+    ports:
+      - "${SCRAPER_PORT:-3000}:3000"
+    environment:
+      PORT: "3000"
+      TZ: "${TZ:-Asia/Jakarta}"
+      # Berapa halaman detail yang dibuka bersamaan saat detail=true
+      DETAIL_CONCURRENCY: "${DETAIL_CONCURRENCY:-3}"
+      # Kosongkan untuk memakai Chromium bawaan image ini. Isi salah satunya kalau
+      # server tujuan sudah punya Playwright sendiri — sidecar akan menyambung ke sana
+      # dan tidak lagi menjalankan browser. Cek hasilnya lewat GET /health.
+      PLAYWRIGHT_WS_ENDPOINT: "${PLAYWRIGHT_WS_ENDPOINT:-}"
+      PLAYWRIGHT_CDP_ENDPOINT: "${PLAYWRIGHT_CDP_ENDPOINT:-}"
+    # Chromium butuh /dev/shm besar, kalau tidak tab sering crash
+    shm_size: "1gb"
+    init: true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
