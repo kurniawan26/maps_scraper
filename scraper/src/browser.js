@@ -43,19 +43,95 @@ function openBrowser() {
   return chromium.launch({ headless: true, args: LAUNCH_ARGS });
 }
 
+// --- Daur hidup browser --------------------------------------------------
+//
+// Browser tidak dinyalakan saat proses start, melainkan saat context pertama
+// dibutuhkan, lalu dipakai ulang. Dua mekanisme menjaganya tidak hidup selamanya:
+//
+//   BROWSER_IDLE_TIMEOUT_MS  tutup browser setelah sekian lama tidak dipakai
+//   BROWSER_MAX_CONTEXTS     tutup dan nyalakan ulang setelah sekian context
+//
+// Isi 0 untuk mematikan salah satunya. Keduanya hanya menutup browser ketika
+// tidak ada context yang sedang berjalan, jadi tidak pernah memotong scraping
+// yang belum selesai.
+//
+// Catatan satuan: yang dihitung adalah context, bukan permintaan HTTP. Satu
+// pencarian biasa memakai satu context; pencarian dengan detail=true memakai
+// satu context ditambah satu per hasil yang diperkaya.
+const IDLE_TIMEOUT_MS = toInt(process.env.BROWSER_IDLE_TIMEOUT_MS, 300_000);
+const MAX_CONTEXTS = toInt(process.env.BROWSER_MAX_CONTEXTS, 200);
+
+function toInt(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 let browserPromise = null;
+// Berapa context yang sedang berjalan. Browser hanya boleh ditutup saat 0.
+let activeContexts = 0;
+let contextsServed = 0;
+// Ditandai true ketika kuota context habis; penutupan menunggu context terakhir.
+let retiring = false;
+let idleTimer = null;
+
+function clearIdleTimer() {
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+  }
+}
+
+// Melepas browser saat ini. Referensinya dibuang secara sinkron lebih dulu agar
+// permintaan yang datang di sela-sela penutupan mendapat browser baru, bukan
+// browser yang sedang ditutup.
+function retireBrowser(reason) {
+  const retired = browserPromise;
+
+  browserPromise = null;
+  contextsServed = 0;
+  retiring = false;
+  clearIdleTimer();
+
+  if (!retired) return;
+
+  console.log(`[scraper] menutup browser (${reason})`);
+  retired.then((browser) => browser.close().catch(() => {})).catch(() => {});
+}
+
+function scheduleIdleShutdown() {
+  if (IDLE_TIMEOUT_MS === 0) return;
+
+  clearIdleTimer();
+  idleTimer = setTimeout(() => {
+    if (activeContexts === 0) retireBrowser(`idle ${IDLE_TIMEOUT_MS} ms`);
+  }, IDLE_TIMEOUT_MS);
+
+  // Timer tidak boleh menahan proses tetap hidup saat hendak berhenti.
+  idleTimer.unref?.();
+}
+
+function launchBrowser() {
+  const promise = openBrowser().then((browser) => {
+    browser.on('disconnected', () => {
+      // Hanya bereaksi kalau ini memang browser yang sedang aktif. Tanpa
+      // penjagaan ini, sinyal dari browser lama bisa membuang browser
+      // pengganti yang baru saja dinyalakan.
+      if (browserPromise !== promise) return;
+
+      browserPromise = null;
+      contextsServed = 0;
+      retiring = false;
+      clearIdleTimer();
+    });
+
+    return browser;
+  });
+
+  return promise;
+}
 
 export async function getBrowser() {
-  if (!browserPromise) {
-    browserPromise = openBrowser().then((browser) => {
-      // Kalau browser mati (OOM, crash, atau server remote putus), buang cache-nya
-      // supaya request berikutnya menyambung/launch ulang.
-      browser.on('disconnected', () => {
-        browserPromise = null;
-      });
-      return browser;
-    });
-  }
+  if (!browserPromise) browserPromise = launchBrowser();
 
   try {
     return await browserPromise;
@@ -65,9 +141,49 @@ export async function getBrowser() {
   }
 }
 
+async function acquireBrowser() {
+  clearIdleTimer();
+
+  // Kuota sudah habis dan tidak ada yang memakai: tutup sekarang, lalu
+  // nyalakan yang baru untuk permintaan ini.
+  if (retiring && activeContexts === 0) retireBrowser(`kuota ${MAX_CONTEXTS} context`);
+
+  const browser = await getBrowser();
+
+  activeContexts += 1;
+  contextsServed += 1;
+  if (MAX_CONTEXTS > 0 && contextsServed >= MAX_CONTEXTS) retiring = true;
+
+  return browser;
+}
+
+function releaseBrowser() {
+  activeContexts = Math.max(0, activeContexts - 1);
+  if (activeContexts > 0) return;
+
+  if (retiring) {
+    retireBrowser(`kuota ${MAX_CONTEXTS} context`);
+    return;
+  }
+
+  scheduleIdleShutdown();
+}
+
+// Dilaporkan lewat GET /health agar perilaku daur hidupnya dapat diamati.
+export function browserStats() {
+  return {
+    running: browserPromise !== null,
+    active_contexts: activeContexts,
+    contexts_served: contextsServed,
+    idle_timeout_ms: IDLE_TIMEOUT_MS,
+    max_contexts: MAX_CONTEXTS,
+    retiring
+  };
+}
+
 export async function withPage(options, callback) {
   const { lang = 'id', country = 'ID', timeout = 45000, blockAssets = true } = options;
-  const browser = await getBrowser();
+  const browser = await acquireBrowser();
 
   const context = await browser.newContext({
     locale: `${lang}-${country}`,
@@ -102,6 +218,7 @@ export async function withPage(options, callback) {
     return await callback(page);
   } finally {
     await context.close().catch(() => {});
+    releaseBrowser();
   }
 }
 
@@ -118,17 +235,18 @@ export async function dismissConsent(page) {
   });
 }
 
+// Dipanggil saat proses berhenti; menunggu penutupan benar-benar selesai.
+// Untuk browser milik server lain, close() hanya memutus sambungan.
 export async function closeBrowser() {
-  if (!browserPromise) return;
-  const browser = await browserPromise.catch(() => null);
+  clearIdleTimer();
+
+  const pending = browserPromise;
   browserPromise = null;
-  if (!browser) return;
+  contextsServed = 0;
+  retiring = false;
 
-  // Browser milik server lain hanya diputus sambungannya, bukan dimatikan.
-  if (WS_ENDPOINT || CDP_ENDPOINT) {
-    await browser.close().catch(() => {});
-    return;
-  }
+  if (!pending) return;
 
-  await browser.close().catch(() => {});
+  const browser = await pending.catch(() => null);
+  if (browser) await browser.close().catch(() => {});
 }

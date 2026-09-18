@@ -164,6 +164,107 @@ Jangan pakai keduanya sebagai dasar keputusan.
 Tempat yang tidak ditemukan **bukan** error: statusnya tetap `200` dengan
 `found: false`.
 
+### Daur hidup browser
+
+Sidecar **tidak** menyalakan Chromium saat container start. Browser baru dibuat
+ketika permintaan pertama masuk, lalu dipakai ulang oleh permintaan berikutnya —
+yang dibuat per permintaan hanyalah `BrowserContext` (cookie dan cache sendiri),
+bukan browser baru.
+
+| Kondisi | Proses Chromium | Memori container |
+| ------- | --------------- | ---------------- |
+| Baru start, belum ada permintaan | 0 | ~44 MB |
+| Setelah permintaan pertama | 7 | ~144 MB |
+| Idle, sebelum timeout | 6–7 | ~136 MB |
+| Setelah idle timeout | 0 | ~44 MB |
+
+Menyalakan browser hampir tidak menambah waktu: permintaan pertama setelah
+restart terukur 5,86 detik sementara permintaan berikutnya 6,36 dan 5,75 detik —
+biaya `chromium.launch()` tenggelam oleh waktu muat halaman Google Maps.
+
+Dua batas menjaga browser tidak hidup selamanya:
+
+| Variabel | Default | Keterangan |
+| -------- | ------- | ---------- |
+| `BROWSER_IDLE_TIMEOUT_MS` | `300000` | Tutup browser setelah sekian lama tanpa pemakaian. `0` mematikan |
+| `BROWSER_MAX_CONTEXTS` | `200` | Tutup dan nyalakan ulang setelah sekian context. `0` mematikan |
+
+Yang dihitung `BROWSER_MAX_CONTEXTS` adalah **context**, bukan permintaan HTTP:
+satu pencarian biasa memakai 1 context, sedangkan pencarian dengan `detail=true`
+memakai 1 context ditambah satu per hasil yang diperkaya.
+
+**Keduanya tidak pernah memotong scraping yang sedang berjalan.** Penutupan hanya
+terjadi saat jumlah context aktif nol; kalau kuota habis di tengah permintaan,
+browser baru ditutup setelah context terakhir selesai. Alasan penutupan dicatat
+di log:
+
+```
+[scraper] menutup browser (idle 300000 ms)
+[scraper] menutup browser (kuota 200 context)
+```
+
+Keadaannya dapat diamati lewat `GET /health` pada sidecar:
+
+```json
+{
+  "status": "ok",
+  "browser": {
+    "mode": "launch", "running": true,
+    "active_contexts": 0, "contexts_served": 12,
+    "idle_timeout_ms": 300000, "max_contexts": 200, "retiring": false
+  }
+}
+```
+
+### Kebutuhan memori
+
+Diukur dengan `docker stats`, sampling setiap ~0,5 detik selama permintaan
+berjalan (bukan sesudahnya), pada mesin dengan RAM 19 GB.
+
+| Kondisi | sidecar | Phoenix | total |
+| ------- | ------- | ------- | ----- |
+| Diam, browser belum menyala | 45 MB | 184 MB | **229 MB** |
+| 1 pencarian sederhana (puncak) | 405 MB | 183 MB | 588 MB |
+| 1 pencarian daftar, `limit=20` | 249 MB | 183 MB | 432 MB |
+| 1 pencarian `detail=true limit=3` (4 context) | 404 MB | 183 MB | 587 MB |
+| Validasi massal 10 query, concurrency 1 | 459 MB | 168 MB | 627 MB |
+| Validasi massal 10 query, concurrency 3 | 772 MB | 184 MB | 956 MB |
+| Validasi massal + `detail=true` (sampai 12 context) | 990 MB | 175 MB | **1,14 GB** |
+| Setelah pekerjaan selesai | 256 MB | 184 MB | 440 MB |
+| Setelah idle timeout | 45 MB | 184 MB | **229 MB** |
+
+Angka pentingnya: **tiap context bersamaan menambah sekitar 155 MB.** Selisih
+concurrency 1 dan 3 pada beban yang sama adalah 459 MB → 772 MB untuk dua context
+tambahan.
+
+Memori Phoenix rata di ~180 MB apa pun bebannya — BEAM mengalokasikan di depan
+dan pekerjaan berat ada di sidecar, bukan di sini.
+
+#### Dua concurrency itu saling mengalikan
+
+`VALIDATION_CONCURRENCY` menentukan berapa query diproses bersamaan, dan tiap
+query dengan `detail=true` membuka lagi sampai `DETAIL_CONCURRENCY` halaman.
+Keduanya berlipat:
+
+```
+VALIDATION_CONCURRENCY=3  x  (1 + DETAIL_CONCURRENCY=3)  =  sampai 12 context
+```
+
+Itulah baris 1,14 GB pada tabel di atas. Kalau menaikkan salah satunya, hitung
+hasil kalinya — bukan jumlahnya.
+
+#### Ukuran server
+
+| RAM | Cukup untuk |
+| --- | ----------- |
+| 1 GB | Tidak disarankan — beban puncak sudah melewatinya |
+| **2 GB** | Minimum. Pakai default (`VALIDATION_CONCURRENCY=3`), hindari validasi massal dengan `detail=true` |
+| **4 GB** | Nyaman. Seluruh beban di tabel muat dengan sisa lega |
+
+Batasi juga memori containernya lewat `deploy.resources.limits.memory` di Compose
+supaya sidecar yang membengkak tidak menjatuhkan proses lain di server yang sama.
+`BROWSER_IDLE_TIMEOUT_MS` mengembalikan pemakaian ke 229 MB saat sepi.
+
 ### Validasi massal (antrean job)
 
 Untuk memeriksa banyak query sekaligus, kirim satu batch dan ambil hasilnya
@@ -272,6 +373,66 @@ agar batch panjang tidak hilang saat deploy dan bisa dikerjakan beberapa node
 sekaligus. Perlu diingat proyek ini **tidak lagi memasang Ecto/Postgres**, jadi
 langkah itu berarti menambahkan kembali `ecto_sql` + `postgrex` (atau memakai
 penyimpanan lain), bukan sekadar memindahkan state.
+
+### Menjalankan seluruhnya di Docker
+
+`Dockerfile` di akar proyek membangun aplikasi Phoenix sebagai OTP release;
+sidecar punya `scraper/Dockerfile` sendiri. Image aplikasi dibangun dua tahap,
+sehingga hasil akhirnya tidak memuat Elixir, Mix, maupun kode sumber.
+
+Service `app` memakai profile Compose agar `docker compose up -d` biasa tetap
+hanya menyalakan sidecar — alur development (Phoenix di host) tidak berubah.
+
+```bash
+# siapkan secret sekali saja
+echo "SECRET_KEY_BASE=$(mix phx.gen.secret)" >> .env
+
+# jalankan keduanya: sidecar + Phoenix
+docker compose --profile app up -d --build
+
+curl http://localhost:4000/api/health
+```
+
+Tanpa `--profile app`, hanya sidecar yang menyala:
+
+```bash
+docker compose up -d          # sidecar saja, untuk development
+```
+
+| Variabel | Wajib | Keterangan |
+| -------- | ----- | ---------- |
+| `SECRET_KEY_BASE` | **ya** | Hasilkan dengan `mix phx.gen.secret`. Container menolak start tanpa ini |
+| `APP_PORT` | tidak | Port di host untuk Phoenix (default `4000`) |
+| `PHX_HOST` | tidak | Nama host publik, dipakai membentuk URL (default `localhost`) |
+
+Di dalam jaringan Compose, Phoenix menghubungi sidecar lewat nama servicenya
+(`SCRAPER_URL=http://scraper:3000`) — sudah diatur otomatis. Service `app` juga
+menunggu sidecar berstatus `healthy` sebelum dijalankan.
+
+#### Membangun image saja
+
+```bash
+docker build -t maps-scraper-app:latest .
+
+docker run --rm -p 4000:4000 \
+  -e SECRET_KEY_BASE="$(mix phx.gen.secret)" \
+  -e SCRAPER_URL=http://host.docker.internal:3000 \
+  maps-scraper-app:latest
+```
+
+#### Hal yang perlu diketahui
+
+- **HTTPS dipaksa di produksi.** `config/prod.exs` menyalakan `force_ssl`, jadi
+  permintaan HTTP dialihkan ke HTTPS — kecuali untuk host `localhost` dan
+  `127.0.0.1`, yang sengaja dikecualikan supaya pengujian lokal dan healthcheck
+  container tetap jalan. Di produksi, taruh image ini di belakang reverse proxy
+  yang menangani TLS dan meneruskan header `x-forwarded-proto`.
+- **Healthcheck container menganggap `503` tetap sehat.** `/api/health` membalas
+  `503` saat sidecar mati; yang diperiksa di sini adalah Phoenix-nya hidup atau
+  tidak. Kesehatan sidecar diperiksa pada servicenya sendiri.
+- **Versi dipatok** di `ARG` teratas `Dockerfile` (Elixir 1.18.4 / OTP 28.0.3).
+  Samakan dengan versi pengembangan; cek dengan `elixir --version`.
+- Release dijalankan sebagai user `nobody`, bukan root.
 
 ### Menempatkan scraper di server lain
 

@@ -1,0 +1,30 @@
+# Hasil build dan dependensi — semuanya dibangun ulang di dalam image.
+_build/
+deps/
+.elixir_ls/
+
+# Riwayat dan berkas kerja
+.git/
+.gitignore
+.github/
+
+# Konfigurasi lokal. Nilai untuk container diberikan lewat environment,
+# bukan disalin ke dalam image.
+.env
+.env.*
+!.env.example
+
+# Sidecar punya Dockerfile sendiri (scraper/Dockerfile)
+scraper/
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Dokumentasi dan test tidak dibutuhkan saat membangun release
+README.md
+test/
+
+# Berkas sementara editor/OS
+*.swp
+*~
+.DS_Store

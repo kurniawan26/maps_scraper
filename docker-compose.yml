@@ -12,6 +12,9 @@ services:
       TZ: "${TZ:-Asia/Jakarta}"
       # Berapa halaman detail yang dibuka bersamaan saat detail=true
       DETAIL_CONCURRENCY: "${DETAIL_CONCURRENCY:-3}"
+      # Daur hidup browser. Isi 0 untuk mematikan salah satunya.
+      BROWSER_IDLE_TIMEOUT_MS: "${BROWSER_IDLE_TIMEOUT_MS:-300000}"
+      BROWSER_MAX_CONTEXTS: "${BROWSER_MAX_CONTEXTS:-200}"
       # Kosongkan untuk memakai Chromium bawaan image ini. Isi salah satunya kalau
       # server tujuan sudah punya Playwright sendiri — sidecar akan menyambung ke sana
       # dan tidak lagi menjalankan browser. Cek hasilnya lewat GET /health.
@@ -26,3 +29,33 @@ services:
       timeout: 10s
       retries: 5
       start_period: 20s
+
+  # Aplikasi Phoenix. Tidak ikut menyala pada `docker compose up` biasa supaya
+  # alur development (Phoenix di host, sidecar di Docker) tetap seperti semula.
+  # Jalankan keduanya dengan:  docker compose --profile app up -d
+  app:
+    profiles: ["app"]
+    build:
+      context: .
+    image: maps-scraper-app:latest
+    container_name: maps_scraper_app
+    restart: unless-stopped
+    depends_on:
+      scraper:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-4000}:4000"
+    environment:
+      # Nama service dipakai sebagai host: keduanya berada di jaringan yang sama.
+      SCRAPER_URL: "http://scraper:3000"
+      SCRAPER_TIMEOUT_MS: "${SCRAPER_TIMEOUT_MS:-45000}"
+      # Wajib diisi. Hasilkan dengan: mix phx.gen.secret
+      SECRET_KEY_BASE: "${SECRET_KEY_BASE:?SECRET_KEY_BASE belum diisi - jalankan: mix phx.gen.secret}"
+      PHX_HOST: "${PHX_HOST:-localhost}"
+      TZ: "${TZ:-Asia/Jakarta}"
+      VALIDATION_CONCURRENCY: "${VALIDATION_CONCURRENCY:-3}"
+      VALIDATION_MAX_ATTEMPTS: "${VALIDATION_MAX_ATTEMPTS:-3}"
+      VALIDATION_BACKOFF_MS: "${VALIDATION_BACKOFF_MS:-1000}"
+      VALIDATION_MAX_BACKOFF_MS: "${VALIDATION_MAX_BACKOFF_MS:-30000}"
+      VALIDATION_MAX_BATCH: "${VALIDATION_MAX_BATCH:-500}"
+    init: true

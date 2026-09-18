@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { browserMode, closeBrowser } from './browser.js';
+import { browserMode, browserStats, closeBrowser } from './browser.js';
 import { ScrapeError, scrapePlace, scrapeSearch } from './maps.js';
 import { clampInt, isMapsUrl } from './util.js';
 
@@ -77,7 +77,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         status: 'ok',
         uptime: Math.round(process.uptime()),
-        browser: browserMode()
+        browser: { ...browserMode(), ...browserStats() }
       });
     }
 
