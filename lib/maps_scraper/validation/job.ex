@@ -53,9 +53,11 @@ defmodule MapsScraper.Validation.Job do
   @doc """
   Bentuk JSON sebuah job.
 
-  Baris yang sudah selesai hanya membawa jawaban validasinya — `found`,
-  `best_match`, dan satu tempat teratas. Daftar lengkap tiap query bukan tujuan
-  endpoint massal ini; untuk itu gunakan `/api/places`.
+  Baris yang sudah selesai membawa jawaban validasinya — `found`, `best_match`,
+  `verdict`, dan sampai `:max_candidates` kandidat terurut dari yang paling cocok.
+  Kandidatnya sengaja lebih dari satu: yang memutuskan cocok atau tidak ada di
+  luar service ini dan butuh pilihan. Daftar hasil lengkap sebuah query bukan
+  tujuan endpoint massal ini; untuk itu gunakan `/api/places`.
   """
   def to_map(%Job{} = job) do
     counts = counts(job)
@@ -65,7 +67,7 @@ defmodule MapsScraper.Validation.Job do
       status: job.status,
       total: map_size(job.items),
       counts: counts,
-      valid_count: count_valid(job),
+      verdicts: verdicts(job),
       inserted_at: job.inserted_at,
       finished_at: job.finished_at,
       results:
@@ -100,15 +102,22 @@ defmodule MapsScraper.Validation.Job do
     end
   end
 
-  # "Valid" di sini berarti Google mengembalikan tempat DAN hasilnya benar-benar
-  # cocok dengan query. Lihat catatan best_match di README.
-  defp count_valid(%Job{items: items}) do
-    Enum.count(items, fn {_index, item} ->
-      match?(%{status: :ok, result: %{found: true}}, item) and valid_match?(item.result)
+  @doc """
+  Rekap vonis seluruh baris.
+
+  Vonis ditetapkan saat hasil scraping masuk — lihat `MapsScraper.Validation.Queue`.
+  `match` sudah cukup meyakinkan tanpa penilaian lanjutan, `review` perlu dinilai
+  di luar service ini, `no_match` tidak punya kandidat yang layak dinilai. Baris
+  yang gagal di-scrape tidak masuk hitungan mana pun; lihat `counts/1` untuk itu.
+  """
+  def verdicts(%Job{items: items}) do
+    Enum.reduce(items, %{match: 0, review: 0, no_match: 0}, fn
+      {_index, %{status: :ok, result: %{verdict: verdict}}}, acc
+      when verdict in [:match, :review, :no_match] ->
+        Map.update!(acc, verdict, &(&1 + 1))
+
+      {_index, _item}, acc ->
+        acc
     end)
   end
-
-  defp valid_match?(%{best_match: nil}), do: true
-  defp valid_match?(%{best_match: score}) when is_number(score), do: score >= 0.5
-  defp valid_match?(_), do: false
 end

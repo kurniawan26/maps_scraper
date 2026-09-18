@@ -44,6 +44,8 @@ Seluruh variabel beserta penjelasannya ada di `.env.example`.
 | `POST` | `/api/places` | Verifikasi lewat body JSON |
 | `GET`  | `/api/health` | Status Phoenix + sidecar |
 
+Koleksi Postman siap pakai ada di `postman/` — lihat [Postman](#postman) di bawah.
+
 ### Parameter
 
 | Nama | Tipe | Default | Keterangan |
@@ -264,13 +266,53 @@ hasil kalinya — bukan jumlahnya.
 
 | RAM | Cukup untuk |
 | --- | ----------- |
-| 1 GB | Tidak disarankan — beban puncak sudah melewatinya |
-| **2 GB** | Minimum. Pakai default (`VALIDATION_CONCURRENCY=3`), hindari validasi massal dengan `detail=true` |
-| **4 GB** | Nyaman. Seluruh beban di tabel muat dengan sisa lega |
+| 1 GB | Tidak — beban puncak jauh melewatinya |
+| 2 GB | Hanya untuk pencarian satuan. **Tidak cukup** untuk validasi massal dengan `detail=true`: puncaknya sendiri sudah 1,8 GB untuk kedua container, belum termasuk OS |
+| **4 GB** | **Minimum yang disarankan.** Puncak terukur 1,8 GB menyisakan ruang untuk OS dan lonjakan |
+| 8 GB | Longgar; perlu kalau Anda menaikkan `VALIDATION_CONCURRENCY` atau `DETAIL_CONCURRENCY` |
+
+Kalau server Anda hanya 2 GB dan tetap ingin validasi massal, turunkan
+pengalinya — misalnya `DETAIL_CONCURRENCY=1` dan `VALIDATION_CONCURRENCY=2`
+(6 context, sekitar 0,9 GB) — dan turunkan limit di compose mengikutinya.
 
 Batasi juga memori containernya lewat `deploy.resources.limits.memory` di Compose
 supaya sidecar yang membengkak tidak menjatuhkan proses lain di server yang sama.
-`BROWSER_IDLE_TIMEOUT_MS` mengembalikan pemakaian ke 229 MB saat sepi.
+`docker-compose.prod.yml` sudah memasangnya.
+
+#### Pengukuran ulang pada image produksi
+
+Tabel di atas diukur pada alur development (Phoenix di host). Diukur ulang pada
+image produksi — Phoenix dari release, sidecar dari image yang sama yang
+dideploy — dengan batch 6 query, `limit=3`, `detail=true`, `VALIDATION_CONCURRENCY=3`:
+
+| Kondisi | sidecar | app |
+| ------- | ------- | --- |
+| Container baru, browser belum pernah menyala | 44 MB | 176 MB |
+| **Puncak, 12 context bersamaan** | **1608 MB** | 180 MB |
+| Selesai kerja, browser masih hidup | 481 MB | 180 MB |
+| Idle, browser sudah ditutup | 246 MB | 180 MB |
+
+Tiga hal yang berbeda dari tabel sebelumnya dan mengubah keputusan ukuran server:
+
+1. **Puncaknya lebih tinggi: 1,6 GB, bukan 990 MB.** Bentuk bebannya lebih berat
+   — tiap query mengembalikan feed berisi 3 hasil, jadi keduabelas context
+   benar-benar terpakai penuh.
+2. **Sidecar tidak kembali ke 44 MB setelah idle, melainkan ke 246 MB.** Angka
+   44 MB hanya berlaku untuk container yang belum pernah menjalankan browser
+   sama sekali. Untuk menghitung kebutuhan server, pakai 246 MB sebagai lantai.
+3. **Memori Phoenix tidak bergerak** — 176–180 MB apa pun bebannya, sesuai
+   dugaan: pekerjaan berat ada di sidecar.
+
+Marginalnya sekitar **113 MB per context bersamaan** di atas lantai 246 MB.
+Batas atas sesungguhnya bukan 12 context melainkan:
+
+```
+MAX_CONCURRENT_SCRAPES=4  x  (1 + DETAIL_CONCURRENCY=3)  =  16 context  ~ 2,0 GB
+```
+
+Karena itu limit sidecar di `docker-compose.prod.yml` disetel **2560 MB**, bukan
+1536 MB — nilai yang lebih rendah akan membuat container di-OOM-kill tepat pada
+beban yang paling mungkin Anda jalankan.
 
 ### Validasi massal (antrean job)
 
@@ -299,17 +341,22 @@ curl http://localhost:4000/api/validations
 | `GET`  | `/api/validations/:id` | Status dan hasil job |
 | `GET`  | `/api/validations` | Ringkasan antrean |
 
-Hasil tiap baris sudah dipadatkan ke jawaban validasinya saja — `found`,
-`best_match`, dan satu tempat teratas. Untuk daftar hasil lengkap sebuah query,
-pakai `/api/places`.
+Hasil tiap baris dipadatkan ke jawaban validasinya — `found`, `best_match`,
+`verdict`, dan beberapa **kandidat** terurut dari yang paling cocok. Untuk daftar
+hasil lengkap sebuah query, pakai `/api/places`.
+
+Kandidatnya sengaja lebih dari satu. `best_match` diambil dari seluruh hasil, jadi
+tempat yang paling cocok bisa berada di posisi kedua atau ketiga versi Google —
+kalau hanya yang teratas yang dibawa, jawaban yang benar ikut terbuang sebelum
+sempat dinilai.
 
 ```json
 {
   "job_id": "iq-9VDY7UabOrjHJ",
   "status": "done",
   "total": 6,
-  "valid_count": 4,
   "counts": { "pending": 0, "running": 0, "ok": 6, "error": 0 },
+  "verdicts": { "match": 4, "review": 1, "no_match": 1 },
   "results": [
     {
       "index": 0,
@@ -318,15 +365,64 @@ pakai `/api/places`.
       "attempts": 1,
       "found": true,
       "best_match": 1,
-      "place": { "name": "Monumen Nasional", "address": "...", "latitude": -6.1753083, "longitude": 106.8271106 }
+      "verdict": "match",
+      "candidates": [
+        { "name": "Monumen Nasional", "address": "...", "maps_url": "...",
+          "place_id": null, "cid": "4407571450964851912", "ftid": "0x2e69f5d2e764b12d:0x3d2ad6e1e0e9bcc8",
+          "latitude": -6.1753083, "longitude": 106.8271106, "match": 1 }
+      ]
     }
   ]
 }
 ```
 
-`valid_count` memakai aturan yang sama dengan bagian **Membaca hasilnya**:
-`found == true` dan (`best_match == null` atau `best_match >= 0.5`). Jadi alamat
-fiktif yang dijawab Google dengan tempat lain **tidak** ikut terhitung.
+#### Vonis
+
+`verdict` bernilai tiga arah, bukan dua — karena keputusan akhir yang butuh
+pertimbangan sebaiknya diambil di luar service ini (mis. membandingkan alamat
+hasil scraping dengan alamat yang sudah Anda simpan):
+
+| `verdict` | Kapan | Tindak lanjut |
+| --------- | ----- | ------------- |
+| `match` | `best_match >= VALIDATION_MATCH_THRESHOLD` **dan** kandidat teratas unggul jelas | Cukup meyakinkan, tidak perlu dinilai lagi |
+| `review` | Skor di antara kedua ambang, `best_match` `null`, **atau** dua kandidat teratas berimpit | Kirim kandidatnya ke penilai di luar |
+| `no_match` | `found == false`, tanpa kandidat, atau skor di bawah `VALIDATION_REVIEW_THRESHOLD` | Tidak ada yang layak dinilai |
+
+`best_match` bernilai `null` ketika skor kemiripan memang tidak berlaku — input
+berupa URL atau koordinat. Itu **bukan** bukti cocok, jadi barisnya masuk `review`.
+
+**Kandidat berimpit juga masuk `review`, setinggi apa pun skornya.** Skor menjawab
+"ada yang cocok", bukan "yang mana yang cocok". Ketika kandidat teratas hanya
+unggul `VALIDATION_AMBIGUITY_MARGIN` atau kurang dari kandidat berikutnya,
+pertanyaan kedua belum terjawab. Ini sering terjadi pada `detail=true`: alamat
+lengkap membuat beberapa tempat berbeda di kecamatan yang sama memuat kata yang
+persis sama, sehingga semuanya berskor penuh. Tanpa aturan ini, baris yang paling
+perlu dinilai justru yang tidak pernah dikirim.
+
+#### Alamat: `detail=false` vs `detail=true`
+
+Ini menentukan untuk pembandingan alamat, dan selisihnya besar (diukur pada
+`apotek gambir jakarta pusat`):
+
+| | Panjang alamat | Isi |
+| --- | --- | --- |
+| `detail=false` (kartu feed) | 35–61 karakter | jalan + RT/RW saja |
+| `detail=true` (halaman tempat) | 123–144 karakter | + kelurahan, kecamatan, kota, provinsi, kode pos |
+
+Karena `address` ikut masuk hitungan `best_match`, pilihan ini mengubah skornya —
+pada contoh di atas dari `0.5 / 0.25 / 0.25` menjadi `1 / 1 / 1`. Kalau tujuannya
+membandingkan alamat, `detail=true` dengan `limit` kecil (3–5) biasanya yang
+Anda mau; pada `limit` sekecil itu halaman detail dibuka paralel sehingga waktunya
+hampir tidak bertambah, dan yang bertambah adalah jumlah context.
+
+Konsekuensinya skor jadi kurang membedakan — justru karena itu aturan kandidat
+berimpit di atas ada.
+
+Vonis ini sengaja murah dan kasar: gunanya memilah baris mana yang perlu dinilai
+lebih lanjut, bukan menjadi keputusan akhir. Kedua ambangnya perlu disetel ulang
+begitu sebaran skor data Anda terlihat — nilai bawaannya titik awal, bukan hasil
+pengukuran. Perlu diingat `best_match` berbutir kasar untuk query pendek: dengan
+dua kata bermakna, skor yang mungkin hanya 0, 0.5, dan 1.
 
 `status` job bernilai `running` atau `done`. Status tiap baris: `pending` (menunggu
 giliran atau menunggu retry), `running`, `ok`, `error`.
@@ -370,6 +466,10 @@ Lewat environment, tanpa rebuild:
 | `VALIDATION_MAX_BATCH` | `500` | Baris maksimum per batch |
 | `VALIDATION_JOB_TTL_MS` | `900000` | Hasil job bisa diambil selama ini setelah selesai. `0` mematikan |
 | `VALIDATION_MAX_JOBS` | `1000` | Batas jumlah job tersimpan. `0` mematikan |
+| `VALIDATION_MAX_CANDIDATES` | `5` | Kandidat yang dibawa tiap baris hasil |
+| `VALIDATION_MATCH_THRESHOLD` | `0.8` | Di atas ini divonis `match` |
+| `VALIDATION_REVIEW_THRESHOLD` | `0.3` | Di bawah ini divonis `no_match` |
+| `VALIDATION_AMBIGUITY_MARGIN` | `0.1` | Selisih skor dua kandidat teratas yang masih dianggap berimpit |
 
 #### Batasan yang perlu diketahui
 
@@ -447,6 +547,138 @@ docker run --rm -p 4000:4000 \
 - **Versi dipatok** di `ARG` teratas `Dockerfile` (Elixir 1.18.4 / OTP 28.0.3).
   Samakan dengan versi pengembangan; cek dengan `elixir --version`.
 - Release dijalankan sebagai user `nobody`, bukan root.
+
+### Produksi
+
+`docker-compose.yml` ditujukan untuk development — ia **membangun** image dari
+source. Produksi memakai berkas tersendiri yang **menarik image jadi** dari
+registry:
+
+| | Development | Produksi |
+| --- | --- | --- |
+| Asal image | `build:` dari source | `image:` dari registry |
+| Porta sidecar | dipublikasikan `3000:3000` | **tidak dipublikasikan sama sekali** |
+| Porta Phoenix | `0.0.0.0:4000` | `127.0.0.1:4000` (di belakang reverse proxy) |
+| Phoenix | di balik profil `app` | selalu menyala |
+| Batas memori | tidak ada | sidecar 1,5 GB, Phoenix 512 MB |
+| Log | tak terbatas | dirotasi, 10 MB × 5 |
+| `stop_grace_period` | bawaan 10 detik | 30 detik |
+
+Ia **berdiri sendiri, bukan override.** Menumpuknya di atas `docker-compose.yml`
+(`-f ... -f ...`) tidak akan menghasilkan yang diinginkan: override hanya bisa
+menambah, tidak bisa mencabut — dan `ports:` sidecar justru yang paling perlu
+hilang.
+
+Karena tidak ada `build:`, berkas ini bisa disalin **sendirian** ke server tujuan
+tanpa source code, cukup ditemani `.env` di sebelahnya.
+
+#### 1. Bangun dan dorong image
+
+Keduanya sekaligus lewat `script.sh`:
+
+```bash
+./script.sh                  # bangun + dorong keduanya, tag :latest
+./script.sh -t v1.2.0        # tag :v1.2.0 sekaligus :latest
+./script.sh --no-push        # bangun saja
+./script.sh --scraper-only   # hanya sidecar
+./script.sh -n namespace-anda
+```
+
+Setelah mendorong, skrip mencetak baris `APP_IMAGE=` dan `SCRAPER_IMAGE=` yang
+sudah berisi digest — tinggal disalin ke `.env` produksi.
+
+| Opsi | Guna |
+| ---- | ---- |
+| `-t, --tag TAG` | Tag versi; `:latest` ikut ditandai kecuali `--no-latest` |
+| `-n, --namespace NS` | Ganti namespace registry (default `kurniawan026`) |
+| `--app-only` / `--scraper-only` | Hanya salah satu image |
+| `--no-push` | Bangun saja, jangan terbitkan |
+| `-y, --yes` | Lewati konfirmasi sebelum mendorong |
+
+Karena mendorong berarti menerbitkan ke registry publik, skrip meminta
+konfirmasi lebih dulu — kecuali diberi `-y` atau dijalankan tanpa terminal (CI).
+Repo-nya bisa ditimpa penuh lewat `APP_REPO` / `SCRAPER_REPO`.
+
+Kalau ingin manual:
+
+```bash
+docker build -t kurniawan026/maps_validator:latest .          && docker push kurniawan026/maps_validator:latest
+docker build -t kurniawan026/maps_scraper_sidecar:latest ./scraper && docker push kurniawan026/maps_scraper_sidecar:latest
+```
+
+Dorongan pertama sidecar memakan waktu — lapisan Playwright-nya beberapa giga
+(~3,5 GB). Dorongan berikutnya jauh lebih ringan selama base image-nya tidak
+berubah; image Phoenix hanya ~192 MB.
+
+#### 2. Jalankan di server
+
+```bash
+export SECRET_KEY_BASE=$(mix phx.gen.secret)   # sekali saja, lalu simpan
+export PHX_HOST=api.domain-anda.com
+
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml ps
+```
+
+Nama image bisa ditimpa lewat `APP_IMAGE` dan `SCRAPER_IMAGE` tanpa menyentuh
+berkas compose-nya.
+
+#### Patok dengan digest, bukan `:latest`
+
+`:latest` berpindah tanpa jejak — Anda tidak bisa tahu versi mana yang sedang
+jalan, dan tidak punya jalan pulang saat rilis bermasalah. Untuk produksi,
+pakai digest yang dicetak `docker push`:
+
+```bash
+APP_IMAGE=kurniawan026/maps_validator@sha256:b1412011270110f17a616b707e0a11fed0fa7857314217391b172ea841c0b315
+```
+
+Rollback jadi sekadar mengganti digest dan `up -d` lagi.
+
+Selama masih memakai tag bergerak, `pull_policy: always` pada kedua service
+mencegah jebakan klasik: `up -d` yang diam-diam menjalankan image lama dari cache
+host karena tag-nya kebetulan sama.
+
+Tiga hal yang perlu dipahami sebelum menyalakannya:
+
+- **Sidecar sengaja tidak punya porta yang dipublikasikan.** Ia menerima `query`
+  berupa URL lalu membukanya dengan browser sungguhan, tanpa autentikasi apa pun.
+  Mempublikasikannya berarti menyerahkan browser itu ke siapa saja yang bisa
+  menjangkau porta tersebut. Phoenix menghubunginya lewat nama service di jaringan
+  internal. Untuk memeriksanya saat berjalan, pakai
+  `docker compose -f docker-compose.prod.yml exec scraper node -e "fetch('http://127.0.0.1:3000/health').then(r=>r.text()).then(console.log)"`.
+- **`SECRET_KEY_BASE` dan `PHX_HOST` wajib** — tanpa keduanya `up` gagal dengan
+  pesan yang menyebut variabel mana yang kosong, bukan menyala dengan nilai
+  contoh.
+- **Reverse proxy wajib meneruskan `X-Forwarded-Proto: https`.** Tanpa itu
+  `force_ssl` akan mengalihkan ke HTTPS terus-menerus.
+
+Batas memorinya diambil dari tabel di [Kebutuhan memori](#kebutuhan-memori):
+puncak terukur sidecar 990 MB, Phoenix rata ~184 MB. Kalau Anda menaikkan
+`VALIDATION_CONCURRENCY` atau `DETAIL_CONCURRENCY`, naikkan juga limitnya —
+ingat keduanya saling mengalikan.
+
+### Postman
+
+Di `postman/` ada koleksi dan environment yang bisa langsung diimpor:
+
+| Berkas | Isi |
+| ------ | --- |
+| `MapsScraper.postman_collection.json` | 11 request dalam 3 folder (Health, Places, Validations) |
+| `MapsScraper.local.postman_environment.json` | `baseUrl` = `http://localhost:4000` |
+
+Alur tercepat: jalankan **Health**, lalu **Validations → Kirim batch** (skrip
+test-nya menyimpan `job_id` ke variabel `jobId` secara otomatis), lalu
+**Ambil hasil job** berulang sampai `status` menjadi `done`.
+
+Koleksinya memuat contoh untuk keempat bentuk input (nama, koordinat, URL, dan
+`detail=true`) beserta dua contoh error, dan tiap request menjelaskan hal yang
+mudah mengejutkan — `202` yang bukan hasil, job yang hilang setelah TTL, serta
+arti `verdict` dan kandidat berimpit.
+
+Naikkan timeout Postman kalau perlu: scraping sungguhan makan beberapa detik
+sampai puluhan detik per query.
 
 ### Menempatkan scraper di server lain
 

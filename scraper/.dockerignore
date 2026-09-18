@@ -1,0 +1,10 @@
+# Context build sidecar adalah folder ini, jadi Docker membaca berkas ini —
+# bukan .dockerignore di root repo.
+
+# Dependensi dipasang di dalam image lewat npm install, bukan disalin dari host.
+node_modules/
+npm-debug.log*
+
+.env
+.env.*
+!.env.example

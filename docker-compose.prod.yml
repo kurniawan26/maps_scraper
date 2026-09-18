@@ -1,12 +1,17 @@
+name: maps-scraper
+
 services:
   scraper:
-    build:
-      context: ./scraper
-    image: maps-scraper-sidecar:latest
+    image: ${SCRAPER_IMAGE:-kurniawan026/maps_scraper_sidecar:latest}
+    pull_policy: always
     container_name: maps_scraper_playwright
     restart: unless-stopped
-    ports:
-      - "${SCRAPER_PORT:-3000}:3000"
+
+    expose:
+      - "3000"
+    networks:
+      - internal
+
     environment:
       PORT: "3000"
       TZ: "${TZ:-Asia/Jakarta}"
@@ -18,8 +23,27 @@ services:
       BROWSER_MAX_CONTEXTS: "${BROWSER_MAX_CONTEXTS:-200}"
       PLAYWRIGHT_WS_ENDPOINT: "${PLAYWRIGHT_WS_ENDPOINT:-}"
       PLAYWRIGHT_CDP_ENDPOINT: "${PLAYWRIGHT_CDP_ENDPOINT:-}"
+
     shm_size: "1gb"
     init: true
+    stop_grace_period: 30s
+
+    deploy:
+      resources:
+        limits:
+          memory: 2560M
+        reservations:
+          memory: 256M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    security_opt:
+      - no-new-privileges:true
+
     healthcheck:
       test: [ "CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" ]
       interval: 15s
@@ -28,23 +52,35 @@ services:
       start_period: 20s
 
   app:
-    profiles: [ "app" ]
-    build:
-      context: .
-    image: maps-scraper-app:latest
+    # Aplikasi Phoenix (JSON API).
+    image: ${APP_IMAGE:-kurniawan026/maps_validator:latest}
+    pull_policy: always
     container_name: maps_scraper_app
     restart: unless-stopped
+
     depends_on:
       scraper:
         condition: service_healthy
+
+    # Menempel ke loopback: prod.exs menyalakan force_ssl, jadi yang
+    # menghadap publik adalah reverse proxy yang mengakhiri TLS. Proxy itu wajib
+    # meneruskan `X-Forwarded-Proto: https`, kalau tidak Phoenix akan mengalihkan
+    # ke https terus-menerus. Isi APP_BIND=0.0.0.0 hanya kalau memang tidak ada
+    # proxy di depannya dan Anda paham konsekuensinya.
     ports:
-      - "${APP_PORT:-4000}:4000"
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-4000}:4000"
+    networks:
+      - internal
+
     environment:
+      # Nama service dipakai sebagai host; keduanya di jaringan yang sama.
       SCRAPER_URL: "http://scraper:3000"
       SCRAPER_TIMEOUT_MS: "${SCRAPER_TIMEOUT_MS:-45000}"
-      SECRET_KEY_BASE: "${SECRET_KEY_BASE:?SECRET_KEY_BASE belum diisi - jalankan: mix phx.gen.secret}"
-      PHX_HOST: "${PHX_HOST:-localhost}"
       TZ: "${TZ:-Asia/Jakarta}"
+
+      SECRET_KEY_BASE: "${SECRET_KEY_BASE:?SECRET_KEY_BASE belum diisi - jalankan: mix phx.gen.secret}"
+      PHX_HOST: "${PHX_HOST:?PHX_HOST belum diisi - isi domain publik yang dipakai reverse proxy}"
+
       VALIDATION_CONCURRENCY: "${VALIDATION_CONCURRENCY:-3}"
       VALIDATION_MAX_ATTEMPTS: "${VALIDATION_MAX_ATTEMPTS:-3}"
       VALIDATION_BACKOFF_MS: "${VALIDATION_BACKOFF_MS:-1000}"
@@ -56,4 +92,30 @@ services:
       VALIDATION_MATCH_THRESHOLD: "${VALIDATION_MATCH_THRESHOLD:-0.8}"
       VALIDATION_REVIEW_THRESHOLD: "${VALIDATION_REVIEW_THRESHOLD:-0.3}"
       VALIDATION_AMBIGUITY_MARGIN: "${VALIDATION_AMBIGUITY_MARGIN:-0.1}"
+
     init: true
+
+    # Antrean job ada di memori proses; hentikan dengan tenang supaya batch yang
+    # sedang jalan punya kesempatan menyelesaikan barisnya.
+    stop_grace_period: 30s
+
+    # Phoenix rata di ~184 MB apa pun bebannya (README, "Kebutuhan memori").
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 192M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  internal:
+    driver: bridge

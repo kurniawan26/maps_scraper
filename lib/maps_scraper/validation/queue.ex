@@ -75,6 +75,10 @@ defmodule MapsScraper.Validation.Queue do
       # Batas keras jumlah job tersimpan, untuk deret job yang datang lebih cepat
       # daripada TTL-nya lewat. Isi 0 untuk mematikan salah satunya.
       max_jobs: opts[:max_jobs] || config[:max_jobs] || 1_000,
+      max_candidates: opts[:max_candidates] || config[:max_candidates] || 5,
+      match_threshold: opts[:match_threshold] || config[:match_threshold] || 0.8,
+      review_threshold: opts[:review_threshold] || config[:review_threshold] || 0.3,
+      ambiguity_margin: opts[:ambiguity_margin] || config[:ambiguity_margin] || 0.1,
       lookup: opts[:lookup] || config[:lookup] || MapsScraper.Maps
     }
 
@@ -239,7 +243,11 @@ defmodule MapsScraper.Validation.Queue do
 
   defp settle_job(state, job, index, {:ok, payload}) do
     job =
-      Job.update_item(job, index, &%{&1 | status: :ok, result: summarize(payload), error: nil})
+      Job.update_item(
+        job,
+        index,
+        &%{&1 | status: :ok, result: summarize(payload, state), error: nil}
+      )
 
     put_job(state, job)
   end
@@ -343,32 +351,69 @@ defmodule MapsScraper.Validation.Queue do
 
   defp describe(other), do: %{code: "unknown", message: inspect(other)}
 
-  # Jawaban validasi dipadatkan: cukup ketemu/tidak, seberapa cocok, dan satu
-  # tempat teratas sebagai buktinya.
-  defp summarize(payload) do
-    place = payload |> Map.get("results", []) |> List.first()
+  defp summarize(payload, state) do
+    found = Map.get(payload, "found")
+    best_match = Map.get(payload, "best_match")
+
+    candidates =
+      payload
+      |> Map.get("results", [])
+      |> sort_by_match()
+      |> Enum.take(state.max_candidates)
+      |> Enum.map(&summarize_place/1)
 
     %{
-      found: Map.get(payload, "found"),
-      best_match: Map.get(payload, "best_match"),
+      found: found,
+      best_match: best_match,
+      verdict: verdict(found, best_match, candidates, state),
       type: Map.get(payload, "type"),
       input_type: Map.get(payload, "input_type"),
       count: Map.get(payload, "count"),
-      place: place && summarize_place(place)
+      candidates: candidates
     }
   end
 
-  # Payload sidecar berkunci string; di sini disalin ke kunci atom agar seluruh
-  # isi job konsisten. Daftar kuncinya tetap (tidak dibuat dari data), jadi tidak
-  # ada risiko membuat atom baru dari masukan luar.
+  defp sort_by_match(results) do
+    if Enum.all?(results, &is_nil(&1["match"])) do
+      results
+    else
+      Enum.sort_by(results, &(&1["match"] || -1), :desc)
+    end
+  end
+
+  defp verdict(_found, _best_match, [], _state), do: :no_match
+  defp verdict(found, _best_match, _candidates, _state) when found != true, do: :no_match
+  defp verdict(_found, nil, _candidates, _state), do: :review
+
+  defp verdict(_found, score, candidates, state) when is_number(score) do
+    cond do
+      score < state.review_threshold -> :no_match
+      score < state.match_threshold -> :review
+      ambiguous?(candidates, state) -> :review
+      true -> :match
+    end
+  end
+
+  defp verdict(_found, _best_match, _candidates, _state), do: :review
+
+  defp ambiguous?([%{match: first}, %{match: second} | _], state)
+       when is_number(first) and is_number(second) do
+    first - second <= state.ambiguity_margin
+  end
+
+  defp ambiguous?(_candidates, _state), do: false
+
   defp summarize_place(place) do
     %{
       name: place["name"],
       address: place["address"],
       maps_url: place["maps_url"],
       place_id: place["place_id"],
+      cid: place["cid"],
+      ftid: place["ftid"],
       latitude: place["latitude"],
-      longitude: place["longitude"]
+      longitude: place["longitude"],
+      match: place["match"]
     }
   end
 end

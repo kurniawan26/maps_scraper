@@ -77,12 +77,13 @@ defmodule MapsScraperWeb.ValidationControllerTest do
       assert body["total"] == 3
       assert body["counts"]["ok"] == 2
       assert body["counts"]["error"] == 1
-      assert body["valid_count"] == 1
+      assert body["verdicts"] == %{"match" => 1, "review" => 0, "no_match" => 1}
       assert body["finished_at"]
 
       results = Map.new(body["results"], &{&1["query"], &1})
       assert results["ok:Monas"]["found"] == true
-      assert results["ok:Monas"]["place"]["name"] == "Monas"
+      assert results["ok:Monas"]["verdict"] == "match"
+      assert [%{"name" => "Monas"}] = results["ok:Monas"]["candidates"]
       assert results["notfound:Fiktif"]["found"] == false
       assert results["invalid"]["error"]["code"] == "invalid_params"
     end

@@ -38,6 +38,22 @@ env_int = fn name ->
   end
 end
 
+env_float = fn name ->
+  case System.get_env(name) do
+    nil ->
+      nil
+
+    value ->
+      case Float.parse(String.trim(value)) do
+        {parsed, ""} ->
+          parsed
+
+        _ ->
+          raise "environment variable #{name} harus berupa bilangan, dapat: #{inspect(value)}"
+      end
+  end
+end
+
 scraper_overrides =
   [
     base_url: System.get_env("SCRAPER_URL"),
@@ -62,7 +78,11 @@ validation_overrides =
     max_backoff_ms: env_int.("VALIDATION_MAX_BACKOFF_MS"),
     max_batch: env_int.("VALIDATION_MAX_BATCH"),
     job_ttl_ms: env_int.("VALIDATION_JOB_TTL_MS"),
-    max_jobs: env_int.("VALIDATION_MAX_JOBS")
+    max_jobs: env_int.("VALIDATION_MAX_JOBS"),
+    max_candidates: env_int.("VALIDATION_MAX_CANDIDATES"),
+    match_threshold: env_float.("VALIDATION_MATCH_THRESHOLD"),
+    review_threshold: env_float.("VALIDATION_REVIEW_THRESHOLD"),
+    ambiguity_margin: env_float.("VALIDATION_AMBIGUITY_MARGIN")
   ]
   |> Enum.reject(fn {_key, value} -> is_nil(value) end)
 

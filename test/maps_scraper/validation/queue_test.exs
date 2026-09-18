@@ -50,20 +50,21 @@ defmodule MapsScraper.Validation.QueueTest do
 
       map = Job.to_map(done)
       assert map.total == 3
-      # notfound tidak dihitung valid walaupun scraping-nya sendiri berhasil
-      assert map.valid_count == 2
+      # notfound tidak dihitung cocok walaupun scraping-nya sendiri berhasil
+      assert map.verdicts == %{match: 2, review: 0, no_match: 1}
 
       [first | _] = map.results
       assert first.status == :ok
       assert first.found == true
-      assert first.place.name == "Monas"
+      assert first.verdict == :match
+      assert [%{name: "Monas"}] = first.candidates
     end
 
-    test "hasil dengan best_match rendah tidak dihitung valid" do
+    test "hasil dengan best_match rendah divonis tidak cocok" do
       job = enqueue!(["ok:Monas", "weak:Entah"]) |> Map.fetch!(:id) |> await_done()
 
       assert Job.counts(job).ok == 2
-      assert Job.to_map(job).valid_count == 1
+      assert Job.verdicts(job) == %{match: 1, review: 0, no_match: 1}
     end
 
     test "urutan hasil mengikuti urutan query yang dikirim" do
@@ -75,6 +76,116 @@ defmodule MapsScraper.Validation.QueueTest do
     end
   end
 
+  describe "vonis dan kandidat" do
+    test "kandidat diurutkan dari yang paling cocok, bukan urutan Google" do
+      job = enqueue!(["multi:Monas"]) |> Map.fetch!(:id) |> await_done()
+
+      [result] = Job.to_map(job).results
+
+      # Sidecar mengembalikan Monas di posisi ketiga; yang teratas harus tetap
+      # Monas karena skornya tertinggi.
+      assert Enum.map(result.candidates, & &1.name) == ["Monas", "Mirip B", "Mirip A"]
+      assert Enum.map(result.candidates, & &1.match) == [1, 0.5, 0.2]
+      assert result.verdict == :match
+    end
+
+    test "kandidat dipotong sesuai max_candidates" do
+      queue = start_queue(max_candidates: 2)
+
+      {:ok, job} = Queue.enqueue(queue, ["multi:Monas"], %{})
+      await_done_on(queue, job.id)
+      {:ok, done} = Queue.fetch(queue, job.id)
+
+      [result] = Job.to_map(done).results
+      assert Enum.map(result.candidates, & &1.name) == ["Monas", "Mirip B"]
+    end
+
+    test "kandidat teratas yang berimpit tetap dinilai di luar walau skornya penuh" do
+      job = enqueue!(["ambigu:Apotek Gambir"]) |> Map.fetch!(:id) |> await_done()
+
+      [result] = Job.to_map(job).results
+
+      # Skornya maksimum, jadi menggeser ambang tidak akan mengubah apa pun —
+      # yang belum terjawab bukan "ada yang cocok" tapi "yang mana".
+      assert result.best_match == 1
+      assert Enum.map(result.candidates, & &1.match) == [1, 1, 0.25]
+      assert result.verdict == :review
+    end
+
+    test "kandidat teratas yang unggul jelas tetap divonis cocok" do
+      # multi: berjarak 1 vs 0.5 — jauh di atas ambiguity_margin.
+      job = enqueue!(["multi:Monas"]) |> Map.fetch!(:id) |> await_done()
+
+      [result] = Job.to_map(job).results
+      assert result.verdict == :match
+    end
+
+    test "batas keberimpitan dapat disetel" do
+      queue = start_queue(ambiguity_margin: 0.6)
+
+      # Sekarang selisih 0.5 pada multi: ikut dianggap berimpit.
+      {:ok, job} = Queue.enqueue(queue, ["multi:Monas"], %{})
+      await_done_on(queue, job.id)
+      {:ok, done} = Queue.fetch(queue, job.id)
+
+      [result] = Job.to_map(done).results
+      assert result.verdict == :review
+    end
+
+    test "kandidat membawa ketiga identitas yang mungkin" do
+      # place_id ada pada hasil feed, cid/ftid pada halaman tempat — ketiganya
+      # dibawa supaya tidak ada baris yang pulang tanpa identitas stabil.
+      job = enqueue!(["ok:Monas"]) |> Map.fetch!(:id) |> await_done()
+
+      [result] = Job.to_map(job).results
+      [candidate] = result.candidates
+
+      assert candidate.place_id == "ChIJMonas"
+      assert candidate.cid == "4407571450964851912"
+      assert candidate.ftid == "0x2e69f5d2e764b12d:0x3d2ad6e1e0e9bcc8"
+      assert candidate.maps_url =~ "google.com/maps/place/"
+    end
+
+    test "skor di pita tengah ditandai untuk dinilai di luar" do
+      job = enqueue!(["review:Entah"]) |> Map.fetch!(:id) |> await_done()
+
+      [result] = Job.to_map(job).results
+      assert result.verdict == :review
+      assert result.best_match == 0.5
+      # kandidatnya tetap dibawa supaya penilai di luar punya bahan
+      assert [%{name: "Entah", maps_url: "https://www.google.com/maps/place/Entah"}] =
+               result.candidates
+    end
+
+    test "tanpa skor kemiripan tidak lagi lolos otomatis" do
+      # Input URL/koordinat membuat best_match nil. Dulu kasus ini dihitung valid
+      # tanpa pernah diuji; sekarang ikut dinilai di luar.
+      job = enqueue!(["nomatch:Entah"]) |> Map.fetch!(:id) |> await_done()
+
+      [result] = Job.to_map(job).results
+      assert result.best_match == nil
+      assert result.verdict == :review
+    end
+
+    test "ambang vonis dapat disetel" do
+      queue = start_queue(match_threshold: 0.4, review_threshold: 0.1)
+
+      {:ok, job} = Queue.enqueue(queue, ["review:Entah", "weak:Entah"], %{})
+      await_done_on(queue, job.id)
+      {:ok, done} = Queue.fetch(queue, job.id)
+
+      # 0.5 kini di atas ambang cocok; 0 tetap di bawah ambang penilaian.
+      assert Job.verdicts(done) == %{match: 1, review: 0, no_match: 1}
+    end
+
+    test "baris yang gagal di-scrape tidak masuk rekap vonis" do
+      job = enqueue!(["ok:Monas", "timeout"]) |> Map.fetch!(:id) |> await_done()
+
+      assert Job.verdicts(job) == %{match: 1, review: 0, no_match: 0}
+      assert Job.counts(job) == %{pending: 0, running: 0, ok: 1, error: 1}
+    end
+  end
+
   describe "retry" do
     test "kegagalan sementara diulang sampai berhasil" do
       job = enqueue!(["flaky:2:Monas"]) |> Map.fetch!(:id) |> await_done()
@@ -83,7 +194,7 @@ defmodule MapsScraper.Validation.QueueTest do
       assert result.status == :ok
       # gagal dua kali, berhasil pada percobaan ketiga
       assert result.attempts == 3
-      assert result.place.name == "Monas"
+      assert [%{name: "Monas"}] = result.candidates
     end
 
     test "berhenti setelah max_attempts dan menandai barisnya gagal" do
@@ -174,8 +285,8 @@ defmodule MapsScraper.Validation.QueueTest do
   end
 
   describe "retensi job" do
-    # Antrean global dipakai test lain, jadi retensi diuji pada instance sendiri
-    # dengan setelan yang jauh lebih ketat.
+    # Antrean global dipakai test lain, jadi setelan khusus diuji pada instance
+    # sendiri.
     defp start_queue(opts) do
       name = :"queue_#{System.unique_integer([:positive])}"
       {:ok, pid} = start_supervised({Queue, Keyword.put(opts, :name, name)})
