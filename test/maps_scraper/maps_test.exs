@@ -10,6 +10,21 @@ defmodule MapsScraper.MapsTest do
       assert Maps.input_type("https://www.google.co.id/maps/search/kopi") == :url
     end
 
+    test "menerima subdomain dan ccTLD Google yang sah" do
+      assert Maps.input_type("https://maps.google.com/maps/place/Monas") == :url
+      assert Maps.input_type("https://www.google.co.uk/maps") == :url
+      assert Maps.input_type("https://www.google.de/maps") == :url
+      assert Maps.input_type("https://www.google.com.au/maps") == :url
+    end
+
+    test "menolak host yang hanya menyerupai domain Google" do
+      assert Maps.input_type("https://google.evil.com/maps") == :text
+      assert Maps.input_type("https://google.com.attacker.io/maps/place/x") == :text
+      assert Maps.input_type("https://evil-google.com/maps") == :text
+      assert Maps.input_type("https://notgoogle.com/maps") == :text
+      assert Maps.input_type("https://google.com.evil.co/maps") == :text
+    end
+
     test "mengenali koordinat" do
       assert Maps.input_type("-6.1754,106.8272") == :coordinates
       assert Maps.input_type("-6.1754, 106.8272") == :coordinates

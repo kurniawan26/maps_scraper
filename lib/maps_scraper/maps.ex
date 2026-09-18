@@ -8,6 +8,9 @@ defmodule MapsScraper.Maps do
 
   alias MapsScraper.Maps.Client
 
+  @short_link_hosts ["maps.app.goo.gl", "goo.gl", "g.co"]
+  @google_host ~r/^([a-z0-9-]+\.)*google\.(com|[a-z]{2})(\.[a-z]{2})?$/i
+
   @max_limit 100
   @default_limit 20
   @query_max_length 512
@@ -62,7 +65,7 @@ defmodule MapsScraper.Maps do
       {:ok, %URI{scheme: scheme, host: host}}
       when scheme in ["http", "https"] and is_binary(host) ->
         host = String.replace_prefix(host, "www.", "")
-        host in ["maps.app.goo.gl", "goo.gl", "g.co"] or String.contains?(host, "google.")
+        host in @short_link_hosts or Regex.match?(@google_host, host)
 
       _ ->
         false

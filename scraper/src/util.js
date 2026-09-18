@@ -1,7 +1,12 @@
 // Helper murni (tanpa browser) yang dipakai lintas modul.
 
 const SHORT_LINK_HOSTS = ['maps.app.goo.gl', 'goo.gl', 'g.co'];
-const MAPS_HOSTS = ['google.com', 'google.co.id', 'maps.google.com'];
+const GOOGLE_HOST = /^(?:[a-z0-9-]+\.)*google\.(?:com|[a-z]{2})(?:\.[a-z]{2})?$/i;
+
+// Hostname sudah tanpa "www." di depan.
+export function isGoogleHost(host) {
+  return typeof host === 'string' && GOOGLE_HOST.test(host);
+}
 
 export function isMapsUrl(value) {
   if (typeof value !== 'string') return false;
@@ -16,10 +21,7 @@ export function isMapsUrl(value) {
   const host = url.hostname.replace(/^www\./, '');
   if (SHORT_LINK_HOSTS.includes(host)) return true;
 
-  const isGoogleHost =
-    MAPS_HOSTS.includes(host) || /(^|\.)google\.[a-z.]{2,}$/i.test(host);
-
-  return isGoogleHost && /\/maps(\/|$|\?)/.test(url.pathname + url.search);
+  return isGoogleHost(host) && /\/maps(\/|$|\?)/.test(url.pathname + url.search);
 }
 
 // Google menaruh koordinat di beberapa tempat berbeda pada URL.
@@ -119,7 +121,7 @@ export function searchUrl(query, { lang = 'id', country = 'ID' } = {}) {
 export function withLang(url, { lang = 'id', country = 'ID' } = {}) {
   try {
     const parsed = new URL(url);
-    if (parsed.hostname.replace(/^www\./, '').startsWith('google')) {
+    if (isGoogleHost(parsed.hostname.replace(/^www\./, ''))) {
       parsed.searchParams.set('hl', lang);
       parsed.searchParams.set('gl', country);
     }

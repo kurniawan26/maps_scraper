@@ -95,7 +95,7 @@ function retireBrowser(reason) {
   if (!retired) return;
 
   console.log(`[scraper] menutup browser (${reason})`);
-  retired.then((browser) => browser.close().catch(() => {})).catch(() => {});
+  retired.then((browser) => browser.close().catch(() => { })).catch(() => { });
 }
 
 function scheduleIdleShutdown() {
@@ -184,17 +184,18 @@ export function browserStats() {
 export async function withPage(options, callback) {
   const { lang = 'id', country = 'ID', timeout = 45000, blockAssets = true } = options;
   const browser = await acquireBrowser();
-
-  const context = await browser.newContext({
-    locale: `${lang}-${country}`,
-    timezoneId: process.env.TZ || 'Asia/Jakarta',
-    viewport: { width: 1440, height: 900 },
-    userAgent:
-      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
-    extraHTTPHeaders: { 'Accept-Language': `${lang}-${country},${lang};q=0.9` }
-  });
+  let context = null;
 
   try {
+    context = await browser.newContext({
+      locale: `${lang}-${country}`,
+      timezoneId: process.env.TZ || 'Asia/Jakarta',
+      viewport: { width: 1440, height: 900 },
+      userAgent:
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+      extraHTTPHeaders: { 'Accept-Language': `${lang}-${country},${lang};q=0.9` }
+    });
+
     await context.addCookies([CONSENT_COOKIE]);
     context.setDefaultTimeout(timeout);
     context.setDefaultNavigationTimeout(timeout);
@@ -217,7 +218,7 @@ export async function withPage(options, callback) {
     await dismissConsent(page);
     return await callback(page);
   } finally {
-    await context.close().catch(() => {});
+    if (context) await context.close().catch(() => { });
     releaseBrowser();
   }
 }
@@ -231,7 +232,7 @@ export async function dismissConsent(page) {
     const button = page
       .locator('button[aria-label*="Accept"], button[aria-label*="Setuju"], form button')
       .first();
-    await button.click({ timeout: 5000 }).catch(() => {});
+    await button.click({ timeout: 5000 }).catch(() => { });
   });
 }
 
@@ -248,5 +249,5 @@ export async function closeBrowser() {
   if (!pending) return;
 
   const browser = await pending.catch(() => null);
-  if (browser) await browser.close().catch(() => {});
+  if (browser) await browser.close().catch(() => { });
 }
