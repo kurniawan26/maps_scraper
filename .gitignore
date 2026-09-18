@@ -25,6 +25,10 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 maps_scraper-*.tar
 
+# Dependensi sidecar Node. Dipasang di dalam image lewat scraper/Dockerfile,
+# tidak pernah ikut commit.
+scraper/node_modules/
+
 # Konfigurasi lokal. .env berisi kredensial sungguhan dan tidak boleh ikut commit;
 # yang dibagikan hanya .env.example.
 .env

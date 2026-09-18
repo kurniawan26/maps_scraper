@@ -7,6 +7,7 @@ defmodule MapsScraper.Validation do
   memvalidasi masukan dari request sebelum masuk antrean.
   """
 
+  alias MapsScraper.Maps
   alias MapsScraper.Validation.Queue
 
   @default_max_batch 500
@@ -20,7 +21,12 @@ defmodule MapsScraper.Validation do
   seluruh baris dalam batch.
   """
   def enqueue(params) when is_map(params) do
-    with {:ok, queries} <- fetch_queries(params) do
+    # Opsi divalidasi di sini juga, bukan hanya saat tiap baris dikerjakan.
+    # Tanpa ini `{"queries": [...], "limit": "abc"}` dijawab 202 lebih dulu,
+    # lalu seluruh barisnya gagal satu per satu — klien baru tahu batch-nya
+    # sia-sia setelah polling.
+    with {:ok, queries} <- fetch_queries(params),
+         {:ok, _opts} <- Maps.validate_options(params) do
       Queue.enqueue(queries, Map.take(params, ~w(limit detail lang country)))
     end
   end

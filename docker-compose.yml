@@ -12,6 +12,12 @@ services:
       TZ: "${TZ:-Asia/Jakarta}"
       # Berapa halaman detail yang dibuka bersamaan saat detail=true
       DETAIL_CONCURRENCY: "${DETAIL_CONCURRENCY:-3}"
+      # Anggaran seluruh fase detail; harus sejalan dengan :detail_budget_ms
+      # di config/config.exs supaya batas waktu kedua sisi tidak berselisih
+      DETAIL_BUDGET_MS: "${DETAIL_BUDGET_MS:-60000}"
+      # Permintaan /scrape bersamaan; selebihnya dijawab 503 "busy"
+      MAX_CONCURRENT_SCRAPES: "${MAX_CONCURRENT_SCRAPES:-4}"
+      SHUTDOWN_GRACE_MS: "${SHUTDOWN_GRACE_MS:-10000}"
       # Daur hidup browser. Isi 0 untuk mematikan salah satunya.
       BROWSER_IDLE_TIMEOUT_MS: "${BROWSER_IDLE_TIMEOUT_MS:-300000}"
       BROWSER_MAX_CONTEXTS: "${BROWSER_MAX_CONTEXTS:-200}"
@@ -58,4 +64,7 @@ services:
       VALIDATION_BACKOFF_MS: "${VALIDATION_BACKOFF_MS:-1000}"
       VALIDATION_MAX_BACKOFF_MS: "${VALIDATION_MAX_BACKOFF_MS:-30000}"
       VALIDATION_MAX_BATCH: "${VALIDATION_MAX_BATCH:-500}"
+      # Retensi job di memori: TTL setelah selesai, dan batas keras jumlahnya
+      VALIDATION_JOB_TTL_MS: "${VALIDATION_JOB_TTL_MS:-900000}"
+      VALIDATION_MAX_JOBS: "${VALIDATION_MAX_JOBS:-1000}"
     init: true

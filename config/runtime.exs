@@ -19,12 +19,29 @@ import Config
 # Alamat sidecar scraper dapat ditimpa lewat environment, misalnya saat Phoenix
 # ikut dijalankan di dalam Docker (SCRAPER_URL=http://scraper:3000). Sama seperti
 # di atas, hanya kunci yang benar-benar diisi yang ditimpa.
+# String.to_integer/1 menjatuhkan boot dengan ArgumentError tanpa menyebut
+# variabel mana yang salah. Di sini nilainya diperiksa lebih dulu supaya pesan
+# kegagalannya langsung menunjuk penyebabnya.
+env_int = fn name ->
+  case System.get_env(name) do
+    nil ->
+      nil
+
+    value ->
+      case Integer.parse(String.trim(value)) do
+        {parsed, ""} ->
+          parsed
+
+        _ ->
+          raise "environment variable #{name} harus berupa bilangan bulat, dapat: #{inspect(value)}"
+      end
+  end
+end
+
 scraper_overrides =
   [
     base_url: System.get_env("SCRAPER_URL"),
-    timeout:
-      System.get_env("SCRAPER_TIMEOUT_MS") &&
-        String.to_integer(System.get_env("SCRAPER_TIMEOUT_MS"))
+    timeout: env_int.("SCRAPER_TIMEOUT_MS")
   ]
   |> Enum.reject(fn {_key, value} -> is_nil(value) end)
 
@@ -39,14 +56,15 @@ end
 # nilai dari config/test.exs akan tergilas dan test kehilangan setelannya.
 validation_overrides =
   [
-    concurrency: System.get_env("VALIDATION_CONCURRENCY"),
-    max_attempts: System.get_env("VALIDATION_MAX_ATTEMPTS"),
-    backoff_ms: System.get_env("VALIDATION_BACKOFF_MS"),
-    max_backoff_ms: System.get_env("VALIDATION_MAX_BACKOFF_MS"),
-    max_batch: System.get_env("VALIDATION_MAX_BATCH")
+    concurrency: env_int.("VALIDATION_CONCURRENCY"),
+    max_attempts: env_int.("VALIDATION_MAX_ATTEMPTS"),
+    backoff_ms: env_int.("VALIDATION_BACKOFF_MS"),
+    max_backoff_ms: env_int.("VALIDATION_MAX_BACKOFF_MS"),
+    max_batch: env_int.("VALIDATION_MAX_BATCH"),
+    job_ttl_ms: env_int.("VALIDATION_JOB_TTL_MS"),
+    max_jobs: env_int.("VALIDATION_MAX_JOBS")
   ]
   |> Enum.reject(fn {_key, value} -> is_nil(value) end)
-  |> Enum.map(fn {key, value} -> {key, String.to_integer(value)} end)
 
 if validation_overrides != [] do
   config :maps_scraper, :validation, validation_overrides

@@ -56,6 +56,26 @@ defmodule MapsScraper.MapsTest do
                Maps.lookup(%{"query" => "kopi", "limit" => "abc"})
     end
 
+    test "menolak kode bahasa/region yang bukan kode" do
+      assert {:error, {:invalid, "lang", _}} =
+               Maps.lookup(%{"query" => "kopi", "lang" => "bukan kode"})
+
+      assert {:error, {:invalid, "country", _}} =
+               Maps.lookup(%{"query" => "kopi", "country" => "IDN"})
+
+      assert {:error, {:invalid, "lang", _}} = Maps.lookup(%{"query" => "kopi", "lang" => 1})
+    end
+
+    test "menerima kode bahasa/region yang wajar" do
+      assert {:ok, opts} = Maps.validate_options(%{"lang" => "en", "country" => "US"})
+      assert opts.lang == "en"
+      assert opts.country == "US"
+
+      assert {:ok, %{lang: "pt-BR"}} = Maps.validate_options(%{"lang" => "pt-BR"})
+      # kosong dan tidak diisi sama-sama jatuh ke default
+      assert {:ok, %{lang: "id", country: "ID"}} = Maps.validate_options(%{"lang" => "  "})
+    end
+
     test "menolak detail yang bukan boolean" do
       assert {:error, {:invalid, "detail", _}} =
                Maps.lookup(%{"query" => "kopi", "detail" => "ya"})

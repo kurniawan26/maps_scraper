@@ -17,7 +17,11 @@ config :maps_scraper, MapsScraperWeb.Endpoint,
 # Sidecar Playwright yang melakukan scraping Google Maps (lihat docker-compose.yml)
 config :maps_scraper, :scraper,
   base_url: "http://localhost:3000",
-  timeout: 45_000
+  # batas waktu per halaman di sidecar
+  timeout: 45_000,
+  # anggaran seluruh fase detail=true di sidecar; harus sama dengan
+  # DETAIL_BUDGET_MS di service scraper (lihat docker-compose.yml)
+  detail_budget_ms: 60_000
 
 # Antrean validasi massal (MapsScraper.Validation.Queue)
 config :maps_scraper, :validation,
@@ -27,7 +31,11 @@ config :maps_scraper, :validation,
   max_attempts: 3,
   backoff_ms: 1_000,
   max_backoff_ms: 30_000,
-  max_batch: 500
+  max_batch: 500,
+  # berapa lama hasil job masih bisa diambil setelah selesai (15 menit)
+  job_ttl_ms: 900_000,
+  # batas keras jumlah job yang disimpan di memori
+  max_jobs: 1_000
 
 # Configure Elixir's Logger
 config :logger, :default_formatter,

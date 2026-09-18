@@ -145,6 +145,12 @@ Kolom yang hanya terisi saat `detail=true` atau input berupa URL: `phone`, `webs
 `opening_hours`, `plus_code`, `description`, `thumbnail`. Hasil yang gagal diperkaya
 ditandai `"detail_error": true` tanpa menggagalkan hasil lain.
 
+Fase `detail=true` punya anggaran waktu sendiri (`DETAIL_BUDGET_MS`, default 60
+detik untuk seluruh permintaan). Tanpa batas itu lamanya tumbuh mengikuti `limit`
+dan selalu melewati batas waktu pemanggil. Tempat yang tidak kebagian waktu
+ditandai `"detail_skipped": true` — kolom dari kartu hasil tetap terisi, hanya
+kolom yang butuh membuka halaman yang kosong.
+
 `rating` dan `reviews_count` bersifat sekunder dan tidak dijamin terisi — kartu
 berbayar (`sponsored: true`) memang tidak memuatnya, dan Google merendernya menyusul.
 Jangan pakai keduanya sebagai dasar keputusan.
@@ -159,6 +165,7 @@ Jangan pakai keduanya sebagai dasar keputusan.
 | ------ | ------ | -------- |
 | `422` | `invalid_params` | Parameter tidak valid |
 | `503` | `scraper_unavailable` | Sidecar belum jalan (`docker compose up`) |
+| `503` | `busy` | Sidecar sedang penuh; ulangi sesuai header `Retry-After` |
 | `504` | `timeout` | Scraping melewati batas waktu |
 
 Tempat yang tidak ditemukan **bukan** error: statusnya tetap `200` dengan
@@ -361,12 +368,19 @@ Lewat environment, tanpa rebuild:
 | `VALIDATION_BACKOFF_MS` | `1000` | Jeda dasar sebelum percobaan ulang |
 | `VALIDATION_MAX_BACKOFF_MS` | `30000` | Batas atas jeda |
 | `VALIDATION_MAX_BATCH` | `500` | Baris maksimum per batch |
+| `VALIDATION_JOB_TTL_MS` | `900000` | Hasil job bisa diambil selama ini setelah selesai. `0` mematikan |
+| `VALIDATION_MAX_JOBS` | `1000` | Batas jumlah job tersimpan. `0` mematikan |
 
 #### Batasan yang perlu diketahui
 
 Antrean ini ada **di memori**. Kalau aplikasi di-restart, job yang belum selesai
 ikut hilang dan `GET /api/validations/:id` membalas `404`. Untuk fase development
 itu sepadan dengan kesederhanaannya.
+
+Karena itu pula hasil job **tidak disimpan selamanya**: setelah `VALIDATION_JOB_TTL_MS`
+lewat, job dibuang dan id-nya membalas `404`. Kalau jumlah job melewati
+`VALIDATION_MAX_JOBS`, yang dibuang lebih dulu adalah job selesai yang paling tua —
+job yang masih berjalan tidak pernah dikorbankan. Ambil hasilnya sebelum TTL habis.
 
 Sebelum dipakai produksi, job perlu disimpan di penyimpanan yang tahan restart
 agar batch panjang tidak hilang saat deploy dan bisa dikerjakan beberapa node
@@ -490,6 +504,9 @@ PLAYWRIGHT_CDP_ENDPOINT=http://127.0.0.1:9222 node src/server.js
 | `PLAYWRIGHT_WS_ENDPOINT` | — | Pakai Playwright server yang sudah ada |
 | `PLAYWRIGHT_CDP_ENDPOINT` | — | Pakai Chrome yang sudah berjalan |
 | `DETAIL_CONCURRENCY` | `3` | Halaman detail yang dibuka bersamaan |
+| `DETAIL_BUDGET_MS` | `60000` | Anggaran seluruh fase `detail=true`. Harus sejalan dengan `:detail_budget_ms` di `config/config.exs` |
+| `MAX_CONCURRENT_SCRAPES` | `4` | Permintaan `/scrape` bersamaan; selebihnya dijawab `503 busy`. `0` mematikan |
+| `SHUTDOWN_GRACE_MS` | `10000` | Batas waktu berhenti sebelum proses dihentikan paksa |
 | `TZ` | `Asia/Jakarta` | Zona waktu, memengaruhi jam buka |
 
 Di sisi Phoenix, cukup satu variabel:

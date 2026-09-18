@@ -28,3 +28,7 @@ test/
 *.swp
 *~
 .DS_Store
+
+# Dependensi Node dipasang di dalam image, bukan disalin dari host.
+node_modules/
+scraper/node_modules/

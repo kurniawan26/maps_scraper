@@ -4,6 +4,7 @@ defmodule MapsScraper.Validation.QueueTest do
 
   alias MapsScraper.Validation
   alias MapsScraper.Validation.Job
+  alias MapsScraper.Validation.Queue
   alias MapsScraper.ValidationStub
 
   setup do
@@ -152,8 +153,89 @@ defmodule MapsScraper.Validation.QueueTest do
                Validation.enqueue(%{"queries" => terlalu_banyak})
     end
 
+    test "opsi yang keliru ditolak sebelum job diterima" do
+      # Batas 202-nya tidak diberikan: kalau lolos, seluruh baris baru gagal
+      # satu per satu setelah klien mengira batch-nya diterima.
+      assert {:error, {:invalid, "limit", _}} =
+               Validation.enqueue(%{"queries" => ["ok:A"], "limit" => "abc"})
+
+      assert {:error, {:invalid, "detail", _}} =
+               Validation.enqueue(%{"queries" => ["ok:A"], "detail" => "mungkin"})
+
+      assert {:error, {:invalid, "country", _}} =
+               Validation.enqueue(%{"queries" => ["ok:A"], "country" => "Indonesia"})
+
+      assert {:ok, _job} = Validation.enqueue(%{"queries" => ["ok:A"], "limit" => "5"})
+    end
+
     test "job yang tidak dikenal mengembalikan :error" do
       assert Validation.fetch("tidak-ada") == :error
+    end
+  end
+
+  describe "retensi job" do
+    # Antrean global dipakai test lain, jadi retensi diuji pada instance sendiri
+    # dengan setelan yang jauh lebih ketat.
+    defp start_queue(opts) do
+      name = :"queue_#{System.unique_integer([:positive])}"
+      {:ok, pid} = start_supervised({Queue, Keyword.put(opts, :name, name)})
+      pid
+    end
+
+    defp await_done_on(server, job_id, timeout \\ 3_000) do
+      deadline = System.monotonic_time(:millisecond) + timeout
+
+      Stream.repeatedly(fn ->
+        case Queue.fetch(server, job_id) do
+          {:ok, %Job{status: :done}} -> :done
+          _ -> Process.sleep(10)
+        end
+      end)
+      |> Enum.find(fn
+        :done -> true
+        _ -> System.monotonic_time(:millisecond) > deadline and flunk("job tidak selesai")
+      end)
+    end
+
+    test "job yang selesai dibuang setelah TTL-nya lewat" do
+      queue = start_queue(job_ttl_ms: 60, max_jobs: 0)
+
+      {:ok, job} = Queue.enqueue(queue, ["ok:Monas"], %{})
+      await_done_on(queue, job.id)
+
+      # Masih bisa diambil selama TTL belum lewat.
+      assert {:ok, %Job{status: :done}} = Queue.fetch(queue, job.id)
+
+      Process.sleep(150)
+      assert Queue.fetch(queue, job.id) == :error
+      assert Queue.stats(queue).jobs == 0
+    end
+
+    test "job selesai yang paling tua dibuang saat melewati max_jobs" do
+      queue = start_queue(job_ttl_ms: 0, max_jobs: 2)
+
+      [first, second, third] =
+        for name <- ["ok:A", "ok:B", "ok:C"] do
+          {:ok, job} = Queue.enqueue(queue, [name], %{})
+          await_done_on(queue, job.id)
+          job
+        end
+
+      assert Queue.stats(queue).jobs == 2
+      assert Queue.fetch(queue, first.id) == :error
+      assert {:ok, _} = Queue.fetch(queue, second.id)
+      assert {:ok, _} = Queue.fetch(queue, third.id)
+    end
+
+    test "job yang masih berjalan tidak ikut dibuang" do
+      queue = start_queue(job_ttl_ms: 0, max_jobs: 1)
+
+      {:ok, running} = Queue.enqueue(queue, ["timeout"], %{})
+      {:ok, next} = Queue.enqueue(queue, ["ok:Monas"], %{})
+
+      # Batasnya terlampaui, tapi tidak ada job selesai yang bisa dikorbankan.
+      assert {:ok, _} = Queue.fetch(queue, running.id)
+      assert {:ok, _} = Queue.fetch(queue, next.id)
     end
   end
 

@@ -16,15 +16,15 @@ defmodule MapsScraper.Maps.Client do
   `{:error, reason}` dengan `reason` berupa atom yang sudah dipetakan.
   """
   def scrape(query, opts \\ %{}) do
-    body = Map.merge(%{query: query}, opts)
+    page_timeout = Map.get(opts, :timeout, config(:timeout))
 
-    # Timeout HTTP harus lebih longgar dari timeout browser, kalau tidak
-    # koneksi putus duluan dan kita kehilangan pesan error aslinya.
-    receive_timeout = Map.get(opts, :timeout, config(:timeout)) + 15_000
+    # Timeout dikirim eksplisit, bukan dibiarkan sidecar memakai bawaannya —
+    # kalau tidak, kedua sisi memegang angka sendiri-sendiri.
+    body = Map.merge(opts, %{query: query, timeout: page_timeout})
 
     options =
       Keyword.merge(
-        [json: body, receive_timeout: receive_timeout, retry: false],
+        [json: body, receive_timeout: receive_timeout(opts, page_timeout), retry: false],
         req_options()
       )
 
@@ -57,6 +57,21 @@ defmodule MapsScraper.Maps.Client do
     end
   end
 
+  # Timeout HTTP harus lebih longgar dari yang dipakai browser, kalau tidak
+  # koneksi putus duluan dan pesan error aslinya hilang.
+  #
+  # `timeout` di sidecar berlaku per halaman, bukan per permintaan. Dengan
+  # `detail: true` sidecar membuka tiap hasil satu per satu, jadi lamanya
+  # bertambah sebesar anggaran fase detail — angka yang sama dengan
+  # DETAIL_BUDGET_MS di sidecar. Tanpa memperhitungkannya, permintaan detail
+  # selalu diputus dari sisi sini padahal sidecar masih bekerja.
+  defp receive_timeout(opts, page_timeout) do
+    detail_budget =
+      if Map.get(opts, :detail, false), do: config(:detail_budget_ms, 60_000), else: 0
+
+    page_timeout + detail_budget + 15_000
+  end
+
   defp base_url, do: config(:base_url) |> String.trim_trailing("/")
 
   # Dipakai test untuk menyuntikkan stub Req.Test menggantikan sidecar sungguhan.
@@ -70,5 +85,11 @@ defmodule MapsScraper.Maps.Client do
     :maps_scraper
     |> Application.get_env(:scraper, [])
     |> Keyword.fetch!(key)
+  end
+
+  defp config(key, default) do
+    :maps_scraper
+    |> Application.get_env(:scraper, [])
+    |> Keyword.get(key, default)
   end
 end

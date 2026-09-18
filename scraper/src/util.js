@@ -187,9 +187,12 @@ export function matchScore(query, place) {
   const target = new Set(tokenize([place.name, place.address, place.category].join(' ')));
   if (target.size === 0) return 0;
 
+  // Diambil sekali di luar filter: di dalamnya, Array.from membangun ulang
+  // seluruh daftar untuk tiap kata query.
+  const targetWords = Array.from(target);
+
   const hits = queryTokens.filter(
-    (token) =>
-      target.has(token) || Array.from(target).some((word) => word.startsWith(token))
+    (token) => target.has(token) || targetWords.some((word) => word.startsWith(token))
   ).length;
 
   return Math.round((hits / queryTokens.length) * 100) / 100;

@@ -11,6 +11,9 @@ defmodule MapsScraper.Maps do
   @short_link_hosts ["maps.app.goo.gl", "goo.gl", "g.co"]
   @google_host ~r/^([a-z0-9-]+\.)*google\.(com|[a-z]{2})(\.[a-z]{2})?$/i
 
+  @lang_format ~r/^[a-z]{2,3}(-[a-z]{2,4})?$/i
+  @country_format ~r/^[a-z]{2}$/i
+
   @max_limit 100
   @default_limit 20
   @query_max_length 512
@@ -28,19 +31,27 @@ defmodule MapsScraper.Maps do
   """
   def lookup(params) when is_map(params) do
     with {:ok, query} <- fetch_query(params),
-         {:ok, limit} <- fetch_limit(params),
-         {:ok, detail} <- fetch_detail(params) do
-      opts = %{
-        limit: limit,
-        detail: detail,
-        lang: fetch_string(params, "lang", "id"),
-        country: fetch_string(params, "country", "ID")
-      }
-
+         {:ok, opts} <- validate_options(params) do
       case Client.scrape(query, opts) do
         {:ok, payload} -> {:ok, Map.put(payload, "input_type", to_string(input_type(query)))}
         {:error, reason} -> {:error, reason}
       end
+    end
+  end
+
+  @doc """
+  Memvalidasi opsi yang berlaku untuk satu maupun sekumpulan query.
+
+  Dipakai `lookup/1` sebelum memanggil sidecar, dan `MapsScraper.Validation`
+  sebelum menerima batch — supaya opsi yang keliru ditolak sekali di depan,
+  bukan menggagalkan tiap baris satu per satu setelah job terlanjur diterima.
+  """
+  def validate_options(params) when is_map(params) do
+    with {:ok, limit} <- fetch_limit(params),
+         {:ok, detail} <- fetch_detail(params),
+         {:ok, lang} <- fetch_code(params, "lang", "id", @lang_format),
+         {:ok, country} <- fetch_code(params, "country", "ID", @country_format) do
+      {:ok, %{limit: limit, detail: detail, lang: lang, country: country}}
     end
   end
 
@@ -132,16 +143,30 @@ defmodule MapsScraper.Maps do
     end
   end
 
-  defp fetch_string(params, key, default) do
+  # Kode bahasa/region diteruskan apa adanya ke sidecar: masuk ke `locale`
+  # context Playwright dan ke parameter hl/gl pada URL. Nilai yang bukan kode
+  # membuat pembuatan context gagal, jadi bentuknya diperiksa di sini.
+  defp fetch_code(params, key, default, format) do
     case Map.get(params, key) do
       value when is_binary(value) ->
         case String.trim(value) do
-          "" -> default
-          trimmed -> trimmed
+          "" -> {:ok, default}
+          trimmed -> validate_code(trimmed, key, format)
         end
 
+      nil ->
+        {:ok, default}
+
       _ ->
-        default
+        {:error, {:invalid, key, "harus berupa teks"}}
+    end
+  end
+
+  defp validate_code(value, key, format) do
+    if Regex.match?(format, value) do
+      {:ok, value}
+    else
+      {:error, {:invalid, key, "bukan kode yang dikenal"}}
     end
   end
 end

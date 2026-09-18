@@ -15,6 +15,19 @@ import {
 
 const DETAIL_CONCURRENCY = Number(process.env.DETAIL_CONCURRENCY || 3);
 
+// Dengan detail=true, lama satu permintaan tumbuh mengikuti jumlah hasil: tiap
+// tempat dibuka sendiri, DETAIL_CONCURRENCY sekaligus. Untuk limit besar itu
+// melewati batas waktu pemanggil, yang lalu memutus koneksi sementara sidecar
+// tetap bekerja sia-sia. Anggaran di bawah ini membatasi seluruh fase detail;
+// tempat yang tidak kebagian waktu dikembalikan dengan kolom kartunya saja.
+//
+// Nilainya dipakai MapsScraper.Maps.Client untuk menghitung batas waktu HTTP-nya,
+// jadi harus sejalan dengan :detail_budget_ms di config Elixir.
+const DETAIL_BUDGET_MS = Number(process.env.DETAIL_BUDGET_MS || 60_000);
+
+// Di bawah ini membuka halaman baru hanya akan berujung timeout.
+const DETAIL_MIN_SLICE_MS = 2_000;
+
 // Google mengisi panel secara bertahap: judul lebih dulu, lalu rating, lalu daftar
 // info. Menunggu satu selektor saja tidak cukup karena selektor yang ditunggu bisa
 // muncul sebelum kolom lain terisi. Karena itu halaman dibaca berulang sampai dua
@@ -209,7 +222,15 @@ export async function scrapeSearch(query, options = {}) {
     }
 
     let results = items.slice(0, limit).map(normalizeListItem);
-    if (detail) results = await enrichWithDetail(results, { lang, country, timeout });
+
+    if (detail) {
+      results = await enrichWithDetail(results, {
+        lang,
+        country,
+        timeout,
+        deadline: Date.now() + DETAIL_BUDGET_MS
+      });
+    }
 
     results = results.map((place) => ({ ...place, match: matchScore(query, place) }));
     const bestMatch = results.some((place) => place.match === null)
@@ -284,11 +305,19 @@ async function collectFeed(page, limit) {
 }
 
 // Kartu hasil hanya memuat sebagian kolom; detail lengkap butuh membuka tiap halaman.
-async function enrichWithDetail(results, { lang, country, timeout }) {
+async function enrichWithDetail(results, { lang, country, timeout, deadline }) {
   return mapWithConcurrency(results, DETAIL_CONCURRENCY, async (item) => {
+    const remaining = deadline - Date.now();
+
+    // Anggaran habis: sisa tempat dikembalikan apa adanya. Kolom dari kartu
+    // hasil tetap terisi, hanya kolom yang butuh membuka halaman yang kosong.
+    if (remaining < DETAIL_MIN_SLICE_MS) return { ...item, detail_skipped: true };
+
+    const slice = Math.min(timeout, remaining);
+
     try {
-      const detailed = await withPage({ lang, country, timeout }, (page) =>
-        readPlace(page, withLang(item.maps_url, { lang, country }), { timeout })
+      const detailed = await withPage({ lang, country, timeout: slice }, (page) =>
+        readPlace(page, withLang(item.maps_url, { lang, country }), { timeout: slice })
       );
       return { ...item, ...detailed };
     } catch {

@@ -15,6 +15,10 @@ defmodule MapsScraper.Validation.Queue do
   Catatan: state ini ada di memori. Kalau aplikasi di-restart, job yang belum
   selesai ikut hilang. Selama fase development itu sepadan dengan
   kesederhanaannya; untuk produksi, job perlu dipindahkan ke Postgres.
+
+  Supaya state tidak tumbuh tanpa batas, job yang sudah selesai dibuang setelah
+  `:job_ttl_ms` lewat, dan jumlah job yang disimpan dibatasi `:max_jobs` —
+  yang dibuang selalu job selesai yang paling tua.
   """
 
   use GenServer
@@ -66,6 +70,11 @@ defmodule MapsScraper.Validation.Queue do
       max_attempts: opts[:max_attempts] || config[:max_attempts] || 3,
       backoff_ms: opts[:backoff_ms] || config[:backoff_ms] || 1_000,
       max_backoff_ms: opts[:max_backoff_ms] || config[:max_backoff_ms] || 30_000,
+      # Berapa lama job yang sudah selesai masih bisa diambil sebelum dibuang.
+      job_ttl_ms: opts[:job_ttl_ms] || config[:job_ttl_ms] || 900_000,
+      # Batas keras jumlah job tersimpan, untuk deret job yang datang lebih cepat
+      # daripada TTL-nya lewat. Isi 0 untuk mematikan salah satunya.
+      max_jobs: opts[:max_jobs] || config[:max_jobs] || 1_000,
       lookup: opts[:lookup] || config[:lookup] || MapsScraper.Maps
     }
 
@@ -83,7 +92,10 @@ defmodule MapsScraper.Validation.Queue do
       |> Enum.reduce(state.pending, fn index, acc -> :queue.in({job.id, index}, acc) end)
 
     state =
-      %{state | jobs: Map.put(state.jobs, job.id, %{job | status: :running}), pending: pending}
+      state
+      |> enforce_max_jobs()
+      |> Map.update!(:jobs, &Map.put(&1, job.id, %{job | status: :running}))
+      |> Map.put(:pending, pending)
       |> dispatch()
 
     {:reply, {:ok, Map.fetch!(state.jobs, job.id)}, state}
@@ -157,6 +169,12 @@ defmodule MapsScraper.Validation.Queue do
     else
       {:noreply, state}
     end
+  end
+
+  # Job yang sudah selesai dibuang setelah TTL-nya lewat. Tanpa ini state
+  # GenServer hanya pernah bertambah dan proses akan kehabisan memori.
+  def handle_info({:expire, job_id}, state) do
+    {:noreply, %{state | jobs: Map.delete(state.jobs, job_id)}}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -241,14 +259,48 @@ defmodule MapsScraper.Validation.Queue do
   end
 
   defp put_job(state, job) do
+    just_finished? = Job.settled?(job) and job.status != :done
+
     job =
-      if Job.settled?(job) and job.status != :done do
+      if just_finished? do
         %{job | status: :done, finished_at: DateTime.utc_now()}
       else
         job
       end
 
+    if just_finished? and state.job_ttl_ms > 0 do
+      Process.send_after(self(), {:expire, job.id}, state.job_ttl_ms)
+    end
+
     %{state | jobs: Map.put(state.jobs, job.id, job)}
+  end
+
+  # Membuang job selesai yang paling tua sampai jumlahnya kembali di bawah batas.
+  # Job yang masih berjalan tidak pernah dibuang — kehilangan pekerjaan yang
+  # sedang jalan lebih buruk daripada sesaat melewati batas.
+  defp enforce_max_jobs(state) do
+    excess = map_size(state.jobs) - state.max_jobs + 1
+
+    if state.max_jobs <= 0 or excess <= 0 do
+      state
+    else
+      finished =
+        state.jobs
+        |> Enum.filter(fn {_id, job} -> job.status == :done end)
+        |> Enum.sort_by(fn {_id, job} -> job.finished_at end, DateTime)
+        |> Enum.take(excess)
+
+      if length(finished) < excess do
+        Logger.warning(
+          "antrean validasi menyimpan #{map_size(state.jobs)} job, melewati batas " <>
+            "#{state.max_jobs}; tidak ada job selesai yang bisa dibuang"
+        )
+      end
+
+      Enum.reduce(finished, state, fn {id, _job}, acc ->
+        %{acc | jobs: Map.delete(acc.jobs, id)}
+      end)
+    end
   end
 
   # Jeda menggandakan diri, dengan sedikit acak supaya percobaan ulang beberapa
