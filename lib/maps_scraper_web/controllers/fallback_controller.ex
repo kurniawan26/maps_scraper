@@ -11,6 +11,20 @@ defmodule MapsScraperWeb.FallbackController do
     |> json(%{error: %{code: "invalid_params", field: field, message: message}})
   end
 
+  # URL yang diminta menunjuk alamat internal. 403, bukan 5xx: masukannya yang
+  # bermasalah, dan mengulanginya tidak akan mengubah apa pun.
+  def call(conn, {:error, {:blocked, host}}) do
+    conn
+    |> put_status(:forbidden)
+    |> json(%{
+      error: %{
+        code: "blocked_address",
+        field: "query",
+        message: "#{host} mengarah ke alamat internal dan tidak boleh dibuka"
+      }
+    })
+  end
+
   # Sidecar menjawab, tapi dengan error — teruskan status dan pesannya apa adanya.
   def call(conn, {:error, {:scraper, status, error}}) do
     conn

@@ -1,5 +1,14 @@
 import Config
 
+# Tiap partisi test memakai berkasnya sendiri supaya test yang berjalan
+# bersamaan tidak berebut satu berkas SQLite.
+config :maps_scraper, MapsScraper.Repo,
+  database: Path.expand("../priv/maps_scraper_test.db", __DIR__),
+  journal_mode: :wal,
+  busy_timeout: 5_000,
+  pool: Ecto.Adapters.SQL.Sandbox,
+  pool_size: 5
+
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
 config :maps_scraper, MapsScraperWeb.Endpoint,
@@ -13,13 +22,17 @@ config :maps_scraper, :scraper,
   timeout: 5_000,
   req_options: [plug: {Req.Test, MapsScraper.Scraper.Client}]
 
-# Antrean diuji tanpa sidecar: lookup diarahkan ke stub, dan jeda retry
-# dipendekkan supaya test tidak perlu menunggu lama.
+# Job tidak dijalankan pekerja yang berjalan sendiri; test memanggil `drain/0`
+# supaya waktunya deterministik.
+config :maps_scraper, Oban, testing: :manual
+
+# Pembebasan job yatim menyentuh database di luar sandbox test, dan tidak ada
+# job yatim yang perlu dibebaskan di sini.
+config :maps_scraper, rescue_orphans_on_boot: false
+
+# Antrean diuji tanpa sidecar: lookup diarahkan ke stub.
 config :maps_scraper, :validation,
-  concurrency: 2,
   max_attempts: 3,
-  backoff_ms: 5,
-  max_backoff_ms: 20,
   max_batch: 10,
   lookup: MapsScraper.ValidationStub
 

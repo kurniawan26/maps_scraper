@@ -3,8 +3,8 @@ defmodule MapsScraperWeb.ConnCase do
   This module defines the test case to be used by
   tests that require setting up a connection.
 
-  Such tests rely on `Phoenix.ConnTest`. Aplikasi ini tidak memakai database,
-  jadi tidak ada sandbox SQL yang perlu disiapkan.
+  Such tests rely on `Phoenix.ConnTest`. Antrean validasi tersimpan di SQLite,
+  jadi tiap test dibungkus transaksi yang di-rollback setelahnya.
   """
 
   use ExUnit.CaseTemplate
@@ -20,10 +20,12 @@ defmodule MapsScraperWeb.ConnCase do
       import Plug.Conn
       import Phoenix.ConnTest
       import MapsScraperWeb.ConnCase
+      import MapsScraper.DataCase, only: [drain: 0]
     end
   end
 
-  setup _tags do
+  setup tags do
+    MapsScraper.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 end

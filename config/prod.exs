@@ -29,6 +29,11 @@ config :maps_scraper, MapsScraperWeb.Endpoint,
     ]
   ]
 
+# Release tidak punya Mix, jadi migrasi dijalankan aplikasi sendiri saat start.
+# Aman karena deployment ini satu node: tidak ada instance kedua yang mungkin
+# bermigrasi pada saat bersamaan.
+config :maps_scraper, auto_migrate: true
+
 # Do not print debug messages in production
 config :logger, level: :info
 

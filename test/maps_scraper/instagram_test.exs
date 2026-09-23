@@ -19,6 +19,14 @@ defmodule MapsScraper.InstagramTest do
                {:ok, "natgeo"}
     end
 
+    test "menerima tautan tanpa skema, seperti yang biasa disalin orang" do
+      # Field bernama `instagram_url` pada pintu gabungan hampir pasti diisi
+      # bentuk ini, bukan URL lengkap.
+      assert Instagram.normalize_username("instagram.com/natgeo") == {:ok, "natgeo"}
+      assert Instagram.normalize_username("www.instagram.com/natgeo/") == {:ok, "natgeo"}
+      assert Instagram.input_type("instagram.com/natgeo") == :url
+    end
+
     test "menolak URL Instagram yang bukan profil" do
       # Tanpa daftar jalur cadangan, "/p/ABC123/" terbaca sebagai akun bernama "p".
       assert {:error, {:invalid, "query", _}} =

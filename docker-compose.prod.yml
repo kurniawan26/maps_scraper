@@ -77,6 +77,10 @@ services:
       SCRAPER_URL: "http://scraper:3000"
       SCRAPER_TIMEOUT_MS: "${SCRAPER_TIMEOUT_MS:-45000}"
       INSTAGRAM_TIMEOUT_MS: "${INSTAGRAM_TIMEOUT_MS:-45000}"
+      WEBSITE_TIMEOUT_MS: "${WEBSITE_TIMEOUT_MS:-45000}"
+      MARKETPLACE_TIMEOUT_MS: "${MARKETPLACE_TIMEOUT_MS:-45000}"
+      SUBJECT_MAX_CONCURRENCY: "${SUBJECT_MAX_CONCURRENCY:-4}"
+      DATABASE_PATH: "/app/data/maps_scraper.db"
       TZ: "${TZ:-Asia/Jakarta}"
 
       SECRET_KEY_BASE: "${SECRET_KEY_BASE:?SECRET_KEY_BASE belum diisi - jalankan: mix phx.gen.secret}"
@@ -87,13 +91,19 @@ services:
       VALIDATION_BACKOFF_MS: "${VALIDATION_BACKOFF_MS:-1000}"
       VALIDATION_MAX_BACKOFF_MS: "${VALIDATION_MAX_BACKOFF_MS:-30000}"
       VALIDATION_MAX_BATCH: "${VALIDATION_MAX_BATCH:-500}"
-      VALIDATION_JOB_TTL_MS: "${VALIDATION_JOB_TTL_MS:-900000}"
+      VALIDATION_JOB_TTL_MS: "${VALIDATION_JOB_TTL_MS:-86400000}"
+      VALIDATION_CLEANUP_CRON: "${VALIDATION_CLEANUP_CRON:-0 20 * * *}"
       VALIDATION_MAX_JOBS: "${VALIDATION_MAX_JOBS:-1000}"
       VALIDATION_MAX_CANDIDATES: "${VALIDATION_MAX_CANDIDATES:-5}"
       VALIDATION_MATCH_THRESHOLD: "${VALIDATION_MATCH_THRESHOLD:-0.8}"
       VALIDATION_REVIEW_THRESHOLD: "${VALIDATION_REVIEW_THRESHOLD:-0.3}"
       VALIDATION_AMBIGUITY_MARGIN: "${VALIDATION_AMBIGUITY_MARGIN:-0.1}"
 
+    volumes:
+      # Antrean validasi hidup di sini. Tanpa volume, batch yang belum
+      # selesai ikut hilang setiap container diganti — dan seluruh alasan
+      # memakai antrean persisten batal.
+      - validation_data:/app/data
     init: true
 
     # Antrean job ada di memori proses; hentikan dengan tenang supaya batch yang
@@ -120,3 +130,8 @@ services:
 networks:
   internal:
     driver: bridge
+
+volumes:
+  # Berkas SQLite antrean validasi. Dinamai supaya selamat dari
+  # `docker compose down` — hanya `down -v` yang menghapusnya.
+  validation_data:

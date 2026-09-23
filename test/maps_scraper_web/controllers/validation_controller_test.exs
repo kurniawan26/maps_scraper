@@ -8,25 +8,14 @@ defmodule MapsScraperWeb.ValidationControllerTest do
     :ok
   end
 
-  defp await_done(conn, job_id, timeout \\ 3_000) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    poll(conn, job_id, deadline)
-  end
+  # Job tidak lagi dijalankan pekerja yang berjalan sendiri selama test; antrean
+  # dijalankan di sini supaya waktunya deterministik, tanpa polling maupun sleep.
+  defp await_done(conn, job_id) do
+    drain()
 
-  defp poll(conn, job_id, deadline) do
     body = conn |> get(~p"/api/validations/#{job_id}") |> json_response(200)
-
-    cond do
-      body["status"] == "done" ->
-        body
-
-      System.monotonic_time(:millisecond) > deadline ->
-        flunk("job tidak selesai: #{inspect(body["counts"])}")
-
-      true ->
-        Process.sleep(10)
-        poll(conn, job_id, deadline)
-    end
+    assert body["status"] == "done", "job belum selesai: #{inspect(body["counts"])}"
+    body
   end
 
   describe "POST /api/validations" do
@@ -39,7 +28,7 @@ defmodule MapsScraperWeb.ValidationControllerTest do
 
       assert is_binary(body["job_id"])
       assert body["total"] == 2
-      assert body["status"] in ["queued", "running"]
+      assert body["status"] == "running"
     end
 
     test "batch tidak valid ditolak 422", %{conn: conn} do
@@ -112,7 +101,8 @@ defmodule MapsScraperWeb.ValidationControllerTest do
     test "melaporkan ringkasan antrean", %{conn: conn} do
       body = conn |> get(~p"/api/validations") |> json_response(200)
 
-      assert body["concurrency"] == 2
+      # Concurrency kini ditentukan ukuran antrean Oban, bukan state GenServer.
+      assert body["concurrency"] == MapsScraper.Validation.concurrency()
       assert body["max_attempts"] == 3
       assert is_integer(body["pending"])
     end

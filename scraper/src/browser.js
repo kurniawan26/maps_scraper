@@ -186,25 +186,70 @@ export function browserStats() {
 // <head> lebih dulu daripada header profil. Menunggu satu selektor karena itu
 // tidak cukup. Halaman dibaca berulang sampai dua pembacaan berturut-turut
 // identik — barulah isinya dianggap final.
+const NOTHING_READ = Symbol('belum terbaca');
+
+// Halaman yang berpindah di tengah pembacaan menghancurkan konteks eksekusinya.
+// Itu bukan kegagalan: sebagian situs mengalihkan ke www setelah
+// domcontentloaded, dan Google menulis ulang URL-nya sendiri beberapa detik
+// setelah halaman siap. Yang perlu dilakukan hanya membaca ulang pada halaman
+// barunya.
+function navigationRace(error) {
+  return /Execution context was destroyed|context was destroyed|frame was detached|Target closed/i.test(
+    error?.message || ''
+  );
+}
+
 export async function extractWhenStable(page, extractor, { rounds = 6, interval = 400 } = {}) {
   let previous = null;
-  let latest = null;
+  let latest = NOTHING_READ;
+  let lastError = null;
 
   for (let round = 0; round < rounds; round += 1) {
-    latest = await page.evaluate(extractor);
-    const serialized = JSON.stringify(latest);
+    let current;
 
-    if (serialized === previous) return latest;
+    try {
+      current = await page.evaluate(extractor);
+    } catch (error) {
+      if (!navigationRace(error)) throw error;
+
+      // Pembacaan sebelumnya berasal dari halaman yang sudah ditinggalkan, jadi
+      // tidak boleh dipakai sebagai pembanding kestabilan.
+      lastError = error;
+      previous = null;
+      await page.waitForTimeout(interval);
+      continue;
+    }
+
+    lastError = null;
+    latest = current;
+
+    const serialized = JSON.stringify(current);
+    if (serialized === previous) return current;
 
     previous = serialized;
     await page.waitForTimeout(interval);
   }
 
+  if (latest === NOTHING_READ) throw lastError ?? new Error('Halaman tidak dapat dibaca');
+
   return latest;
 }
 
 export async function withPage(options, callback) {
-  const { lang = 'id', country = 'ID', timeout = 45000, blockAssets = true } = options;
+  const {
+    lang = 'id',
+    country = 'ID',
+    timeout = 45000,
+    blockAssets = true,
+    // Penangan request milik pemanggil, dijalankan setelah penyaringan aset.
+    // Wajib mengakhiri route-nya sendiri (continue/fulfill/abort).
+    //
+    // Ada karena `route.continue()` TIDAK memanggil ulang handler untuk tiap
+    // lompatan pengalihan — browser mengikutinya sendiri. Sumber "website"
+    // karena itu mengikuti pengalihan secara manual agar tiap lompatan dapat
+    // diperiksa; lihat website.js.
+    handleRequest = null
+  } = options;
   const browser = await acquireBrowser();
   let context = null;
 
@@ -222,16 +267,33 @@ export async function withPage(options, callback) {
     context.setDefaultTimeout(timeout);
     context.setDefaultNavigationTimeout(timeout);
 
-    if (blockAssets) {
-      // Memutus request gambar membuat Google tidak menyisipkan elemen <img> sama sekali,
-      // sehingga URL foto ikut hilang. Karena itu gambar dijawab dengan piksel 1x1:
-      // DOM tetap utuh, byte foto asli tidak diunduh.
-      await context.route('**/*', (route) => {
-        const type = route.request().resourceType();
-        if (type === 'image') {
-          return route.fulfill({ status: 200, contentType: 'image/gif', body: PIXEL });
+    if (blockAssets || handleRequest) {
+      // Satu handler untuk keduanya. Route yang didaftarkan belakangan menang di
+      // Playwright, jadi memasang dua handler terpisah akan membuat yang satu
+      // tidak pernah jalan.
+      await context.route('**/*', async (route) => {
+        const request = route.request();
+        const type = request.resourceType();
+
+        if (blockAssets) {
+          // Memutus request gambar membuat Google tidak menyisipkan elemen <img> sama sekali,
+          // sehingga URL foto ikut hilang. Karena itu gambar dijawab dengan piksel 1x1:
+          // DOM tetap utuh, byte foto asli tidak diunduh.
+          if (type === 'image') {
+            return route.fulfill({ status: 200, contentType: 'image/gif', body: PIXEL });
+          }
+          if (type === 'media' || type === 'font') return route.abort();
         }
-        if (type === 'media' || type === 'font') return route.abort();
+
+        if (handleRequest) {
+          try {
+            return await handleRequest(route, request);
+          } catch {
+            // Handler yang meledak tidak boleh berarti "silakan lewat".
+            return route.abort('failed');
+          }
+        }
+
         return route.continue();
       });
     }

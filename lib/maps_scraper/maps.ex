@@ -14,6 +14,8 @@ defmodule MapsScraper.Maps do
   @lang_format ~r/^[a-z]{2,3}(-[a-z]{2,4})?$/i
   @country_format ~r/^[a-z]{2}$/i
 
+  @name_max_length 200
+
   @max_limit 100
   @default_limit 20
   @query_max_length 512
@@ -26,6 +28,9 @@ defmodule MapsScraper.Maps do
     * `"query"` (wajib) — nama tempat, alamat, koordinat, atau URL Google Maps
     * `"limit"` — jumlah maksimum hasil, 1..#{@max_limit} (default #{@default_limit})
     * `"detail"` — `true` untuk membuka tiap hasil dan mengambil kolom lengkap
+    * `"name"` — nama usaha yang diharapkan. Kalau diisi, `best_match` mengukur
+      kecocokan nama itu terhadap tempat yang ketemu — termasuk untuk input URL,
+      yang tanpa ini tidak punya pembanding sama sekali
     * `"lang"` / `"country"` — kode bahasa dan region hasil (default `id` / `ID`)
 
   """
@@ -49,9 +54,10 @@ defmodule MapsScraper.Maps do
   def validate_options(params) when is_map(params) do
     with {:ok, limit} <- fetch_limit(params),
          {:ok, detail} <- fetch_detail(params),
+         {:ok, name} <- fetch_name(params),
          {:ok, lang} <- fetch_code(params, "lang", "id", @lang_format),
          {:ok, country} <- fetch_code(params, "country", "ID", @country_format) do
-      {:ok, %{limit: limit, detail: detail, lang: lang, country: country}}
+      {:ok, %{limit: limit, detail: detail, name: name, lang: lang, country: country}}
     end
   end
 
@@ -132,6 +138,28 @@ defmodule MapsScraper.Maps do
 
   defp validate_limit(_),
     do: {:error, {:invalid, "limit", "harus di antara 1 dan #{@max_limit}"}}
+
+  defp fetch_name(params) do
+    case Map.get(params, "name") do
+      nil ->
+        {:ok, nil}
+
+      value when is_binary(value) ->
+        case String.trim(value) do
+          "" ->
+            {:ok, nil}
+
+          trimmed when byte_size(trimmed) > @name_max_length ->
+            {:error, {:invalid, "name", "maksimal #{@name_max_length} karakter"}}
+
+          trimmed ->
+            {:ok, trimmed}
+        end
+
+      _ ->
+        {:error, {:invalid, "name", "harus berupa teks"}}
+    end
+  end
 
   defp fetch_detail(params) do
     case Map.get(params, "detail") do

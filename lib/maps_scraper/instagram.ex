@@ -89,7 +89,9 @@ defmodule MapsScraper.Instagram do
     trimmed = String.trim(query)
 
     resolved =
-      if url?(trimmed), do: username_from_url(trimmed), else: bare_username(trimmed)
+      if url_like?(trimmed),
+        do: username_from_url(with_scheme(trimmed)),
+        else: bare_username(trimmed)
 
     case resolved do
       nil -> {:error, {:invalid, "query", "bukan username maupun URL profil Instagram"}}
@@ -99,7 +101,7 @@ defmodule MapsScraper.Instagram do
 
   @doc "Menebak bentuk input agar klien tahu bagaimana query diperlakukan."
   def input_type(query) when is_binary(query) do
-    if query |> String.trim() |> url?(), do: :url, else: :username
+    if query |> String.trim() |> url_like?(), do: :url, else: :username
   end
 
   @doc "Penyedia yang sedang dipakai. Lihat `MapsScraper.Instagram.Provider`."
@@ -109,7 +111,15 @@ defmodule MapsScraper.Instagram do
     |> Keyword.get(:provider, @default_provider)
   end
 
-  defp url?(query), do: Regex.match?(~r|^https?://|i, query)
+  # Username Instagram boleh memuat titik dan garis bawah, tetapi tidak pernah
+  # garis miring. Kehadiran "/" karena itu cukup untuk membedakan tautan dari
+  # username — termasuk tautan yang ditulis tanpa skema, seperti yang biasa
+  # disalin orang dari bilah alamat: "instagram.com/kournicloud".
+  defp url_like?(query), do: String.contains?(query, "/")
+
+  defp with_scheme(query) do
+    if Regex.match?(~r|^[a-z][a-z0-9+.-]*://|i, query), do: query, else: "https://#{query}"
+  end
 
   defp username_from_url(query) do
     with %URI{scheme: scheme, host: host, path: path} when scheme in ["http", "https"] <-

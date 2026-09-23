@@ -2,7 +2,7 @@ defmodule MapsScraperWeb.ValidationController do
   use MapsScraperWeb, :controller
 
   alias MapsScraper.Validation
-  alias MapsScraper.Validation.Job
+  alias MapsScraper.Validation.Batch
 
   action_fallback MapsScraperWeb.FallbackController
 
@@ -12,18 +12,18 @@ defmodule MapsScraperWeb.ValidationController do
   Membalas `202 Accepted` dengan `job_id`; hasilnya diambil lewat `show/2`.
   """
   def create(conn, params) do
-    with {:ok, job} <- Validation.enqueue(params) do
+    with {:ok, batch} <- Validation.enqueue(params) do
       conn
       |> put_status(:accepted)
-      |> json(Job.to_map(job))
+      |> json(Batch.to_map(batch))
     end
   end
 
   @doc "`GET /api/validations/:id` — status dan hasil job."
   def show(conn, %{"id" => job_id}) do
     case Validation.fetch(job_id) do
-      {:ok, job} ->
-        json(conn, Job.to_map(job))
+      {:ok, batch} ->
+        json(conn, Batch.to_map(batch))
 
       :error ->
         conn

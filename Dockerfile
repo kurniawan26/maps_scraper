@@ -72,7 +72,15 @@ WORKDIR /app
 
 COPY --from=builder --chown=nobody:root /app/_build/prod/rel/maps_scraper ./
 
-# Aplikasi tidak menulis apa pun ke disk, jadi tidak perlu berjalan sebagai root.
+# Antrean validasi tersimpan di SQLite, jadi aplikasi ini menulis ke disk —
+# tepat satu direktori, yang harus dipasangi volume kalau antreannya memang
+# diharapkan selamat dari penggantian container.
+ENV DATABASE_PATH=/app/data/maps_scraper.db
+RUN mkdir -p /app/data && chown nobody:root /app/data
+VOLUME ["/app/data"]
+
+# Selain direktori data di atas, aplikasi tidak menulis apa pun — jadi tidak
+# perlu berjalan sebagai root.
 USER nobody
 
 EXPOSE 4000

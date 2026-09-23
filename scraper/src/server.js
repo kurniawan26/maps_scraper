@@ -1,8 +1,17 @@
 import http from 'node:http';
 import { browserMode, browserStats, closeBrowser } from './browser.js';
 import { scrapeProfile } from './instagram.js';
+import { scrapeMarketplace } from './marketplace.js';
 import { scrapePlace, scrapeSearch } from './maps.js';
-import { ScrapeError, clampInt, instagramUsername, isMapsUrl } from './util.js';
+import { scrapeWebsite } from './website.js';
+import {
+  ScrapeError,
+  clampInt,
+  instagramUsername,
+  isMapsUrl,
+  marketplaceStore,
+  websiteUrl
+} from './util.js';
 
 function toInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -70,6 +79,7 @@ function buildOptions(payload) {
     country: typeof payload.country === 'string' ? payload.country : 'ID',
     limit: payload.limit,
     detail: payload.detail === true,
+    name: typeof payload.name === 'string' && payload.name.trim() ? payload.name.trim() : null,
     timeout: buildTimeout(payload)
   };
 }
@@ -81,6 +91,18 @@ function buildInstagramOptions(payload) {
   return {
     lang: typeof payload.lang === 'string' ? payload.lang : 'en',
     country: typeof payload.country === 'string' ? payload.country : 'US',
+    name: typeof payload.name === 'string' && payload.name.trim() ? payload.name.trim() : null,
+    timeout: buildTimeout(payload)
+  };
+}
+
+// Sumber "website" membuka URL yang ditentukan pemanggil, jadi bahasanya
+// mengikuti Maps (id/ID) — bukan dikunci en/US seperti Instagram, yang penanda
+// halamannya memang perlu dipastikan.
+function buildWebsiteOptions(payload) {
+  return {
+    lang: typeof payload.lang === 'string' ? payload.lang : 'id',
+    country: typeof payload.country === 'string' ? payload.country : 'ID',
     name: typeof payload.name === 'string' && payload.name.trim() ? payload.name.trim() : null,
     timeout: buildTimeout(payload)
   };
@@ -143,6 +165,53 @@ async function handleInstagram(req, res) {
   sendJson(res, 200, result);
 }
 
+async function handleMarketplace(req, res) {
+  const { payload, query } = await readQuery(req);
+  const store = marketplaceStore(query);
+
+  if (!store) {
+    throw new ScrapeError('Query bukan URL toko Tokopedia maupun Shopee', {
+      status: 422,
+      code: 'invalid_store_url'
+    });
+  }
+
+  const options = { ...buildWebsiteOptions(payload), query };
+
+  // Tokopedia dibaca lewat HTTP polos tanpa context browser sama sekali, jadi
+  // tidak perlu memakai slot — yang dijaga slot adalah memori Chromium.
+  const result =
+    store.platform === 'tokopedia'
+      ? await scrapeMarketplace(store, options)
+      : await withSlot(() => scrapeMarketplace(store, options));
+
+  sendJson(res, 200, result);
+}
+
+async function handleWebsite(req, res) {
+  const { payload, query } = await readQuery(req);
+  const target = websiteUrl(query);
+
+  if (!target) {
+    throw new ScrapeError('Query bukan URL maupun nama domain yang sah', {
+      status: 422,
+      code: 'invalid_url'
+    });
+  }
+
+  const options = {
+    ...buildWebsiteOptions(payload),
+    query,
+    // Domain telanjang dinaikkan ke https; kalau gagal, boleh dicoba http.
+    // URL yang skemanya ditulis pemanggil dihormati apa adanya.
+    httpFallback: !/^[a-z][a-z0-9+.-]*:\/\//i.test(query.trim())
+  };
+
+  const result = await withSlot(() => scrapeWebsite(target, options));
+
+  sendJson(res, 200, result);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
@@ -162,6 +231,14 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/scrape/instagram') {
       return await handleInstagram(req, res);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/scrape/website') {
+      return await handleWebsite(req, res);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/scrape/marketplace') {
+      return await handleMarketplace(req, res);
     }
 
     return sendJson(res, 404, { error: { code: 'not_found', message: 'Endpoint tidak dikenal' } });

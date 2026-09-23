@@ -120,19 +120,25 @@ async function readLoadedPlace(page, { timeout }) {
 }
 
 export async function scrapePlace(url, options = {}) {
-  const { lang = 'id', country = 'ID', timeout = 45000 } = options;
+  const { lang = 'id', country = 'ID', timeout = 45000, name = null } = options;
 
   try {
     return await withPage({ lang, country, timeout }, async (page) => {
       const place = await readPlace(page, withLang(url, { lang, country }), { timeout });
-      // Skor kemiripan tidak berlaku di sini: URL menunjuk satu tempat secara pasti.
+
+      // URL menunjuk satu tempat secara pasti, jadi kemiripan teks terhadap
+      // URL-nya sendiri tidak berarti apa-apa. Tetapi kalau pemanggil menyebut
+      // nama yang diharapkan, itu bisa dibandingkan dengan tempat yang ketemu —
+      // dan itulah yang menjawab "linknya benar milik usaha ini atau bukan".
+      const match = name ? matchScore(name, place) : null;
+
       return {
         type: 'place',
         query: url,
         found: true,
-        best_match: null,
+        best_match: match,
         count: 1,
-        results: [{ ...place, match: null }]
+        results: [{ ...place, match }]
       };
     });
   } catch (error) {
@@ -152,8 +158,13 @@ export async function scrapePlace(url, options = {}) {
 }
 
 export async function scrapeSearch(query, options = {}) {
-  const { lang = 'id', country = 'ID', timeout = 45000, detail = false } = options;
+  const { lang = 'id', country = 'ID', timeout = 45000, detail = false, name = null } = options;
   const limit = clampInt(options.limit, { min: 1, max: 100, fallback: 20 });
+
+  // Kalau pemanggil menyebut nama yang diharapkan, itu yang dipakai menilai —
+  // bukan query pencariannya. Keduanya bisa berbeda: query boleh berupa alamat,
+  // sedangkan yang ingin dipastikan adalah nama usahanya.
+  const scoreAgainst = name || query;
 
   return withPage({ lang, country, timeout }, async (page) => {
     await page.goto(searchUrl(query, { lang, country }), {
@@ -177,7 +188,7 @@ export async function scrapeSearch(query, options = {}) {
         return { type: 'search', query, found: false, best_match: 0, count: 0, results: [] };
       }
 
-      const match = matchScore(query, place);
+      const match = matchScore(scoreAgainst, place);
       return {
         type: 'place',
         query,
@@ -204,7 +215,7 @@ export async function scrapeSearch(query, options = {}) {
       });
     }
 
-    results = results.map((place) => ({ ...place, match: matchScore(query, place) }));
+    results = results.map((place) => ({ ...place, match: matchScore(scoreAgainst, place) }));
     const bestMatch = results.some((place) => place.match === null)
       ? null
       : results.reduce((best, place) => Math.max(best, place.match), 0);

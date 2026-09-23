@@ -229,13 +229,21 @@ export function instagramUsername(value) {
   const trimmed = value.trim();
   if (!trimmed) return null;
 
-  if (/^https?:\/\//i.test(trimmed)) {
+  // Username Instagram boleh memuat titik dan garis bawah, tetapi tidak pernah
+  // garis miring. Kehadiran "/" karena itu cukup untuk membedakan tautan dari
+  // username — termasuk tautan tanpa skema seperti "instagram.com/kournicloud",
+  // yang justru bentuk paling sering disalin orang.
+  if (trimmed.includes('/')) {
+    const absolute = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
     let url;
     try {
-      url = new URL(trimmed);
+      url = new URL(absolute);
     } catch {
       return null;
     }
+
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
 
     const host = url.hostname.replace(/^www\./, '').toLowerCase();
     if (!INSTAGRAM_HOSTS.includes(host)) return null;
@@ -270,4 +278,181 @@ export function toSocialCount(value) {
   // Dengan akhiran, pemisahnya adalah desimal ("1.5M"), bukan ribuan.
   const base = Number(match[1].replace(/\s/g, '').replace(',', '.'));
   return Number.isFinite(base) ? Math.round(base * suffix) : null;
+}
+
+// --- Website ---------------------------------------------------------------
+
+// Menerima "warungsate.com", "www.warungsate.com/kontak", atau URL lengkap, dan
+// mengembalikan URL absolut. Domain telanjang dinaikkan ke https lebih dulu;
+// sidecar yang menurunkannya ke http kalau https-nya memang tidak ada.
+// Host satu suku kata ("localhost", "intranet") sengaja ikut diterima di sini.
+// Menolaknya sebagai "bukan domain" menyesatkan — yang benar adalah
+// meneruskannya ke pemeriksa alamat, yang akan menolaknya sebagai alamat
+// internal. Nama yang memang tidak ada berakhir sebagai dns_not_found.
+const HOSTNAME =
+  /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i;
+
+export function websiteUrl(value) {
+  if (typeof value !== 'string') return null;
+
+  const trimmed = value.trim();
+  if (!trimmed || /\s/.test(trimmed)) return null;
+
+  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+  let url;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return null;
+  }
+
+  // Hanya http(s). Tanpa penjagaan ini, "file:///etc/passwd" dan
+  // "data:text/html,..." ikut diterima sebagai "website".
+  if (!['http:', 'https:'].includes(url.protocol)) return null;
+
+  const host = url.hostname;
+
+  // Alamat IP telanjang diterima di sini dan disaring assertPublicHost/1 —
+  // pemeriksaannya sama untuk IP literal maupun hasil resolusi DNS.
+  if (isIpLiteral(host)) return url.toString();
+
+  return HOSTNAME.test(host) ? url.toString() : null;
+}
+
+export function isIpLiteral(host) {
+  if (typeof host !== 'string') return false;
+  // URL membungkus IPv6 dengan kurung siku; hostname sudah melepasnya.
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':');
+}
+
+// --- Penjagaan SSRF --------------------------------------------------------
+//
+// Berbeda dari Maps dan Instagram yang host-nya terkunci, sumber "website"
+// membuka URL yang ditentukan pemanggil. Tanpa penyaring di bawah ini, siapa
+// pun bisa memakai service ini sebagai perantara untuk menjangkau apa yang
+// hanya terlihat dari dalam jaringan: metadata cloud di 169.254.169.254,
+// Phoenix di app:4000, atau sidecar ini sendiri.
+//
+// Yang diperiksa adalah ALAMAT HASIL RESOLUSI, bukan namanya. Nama domain
+// publik bisa saja mengarah ke 127.0.0.1, dan pemeriksaan berbasis nama tidak
+// akan melihatnya.
+
+function ipv4Blocked([a, b, c, d]) {
+  if (a === 0) return true; // 0.0.0.0/8
+  if (a === 10) return true; // privat
+  if (a === 127) return true; // loopback
+  if (a === 169 && b === 254) return true; // link-local, termasuk metadata cloud
+  if (a === 172 && b >= 16 && b <= 31) return true; // privat
+  if (a === 192 && b === 168) return true; // privat
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  if (a === 192 && b === 0 && c === 0) return true; // IETF protocol assignments
+  if (a === 192 && b === 0 && c === 2) return true; // TEST-NET-1
+  if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking
+  if (a === 198 && b === 51 && c === 100) return true; // TEST-NET-2
+  if (a === 203 && b === 0 && c === 113) return true; // TEST-NET-3
+  if (a >= 224) return true; // multicast dan sisanya yang dicadangkan
+  void d;
+  return false;
+}
+
+export function isBlockedAddress(address) {
+  if (typeof address !== 'string') return true;
+
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(address)) {
+    const parts = address.split('.').map(Number);
+    if (parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+    return ipv4Blocked(parts);
+  }
+
+  const lower = address.toLowerCase().replace(/%.*$/, '');
+
+  if (lower === '::' || lower === '::1') return true;
+
+  // IPv4 yang dipetakan ke IPv6 (::ffff:127.0.0.1) menembus pemeriksaan IPv6
+  // kalau tidak dikembalikan dulu ke bentuk IPv4-nya.
+  const mapped = lower.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (mapped) return isBlockedAddress(mapped[1]);
+
+  if (/^(fc|fd)[0-9a-f]{2}:/.test(lower)) return true; // fc00::/7 unique local
+  if (/^fe[89ab][0-9a-f]:/.test(lower)) return true; // fe80::/10 link-local
+  if (/^ff[0-9a-f]{2}:/.test(lower)) return true; // multicast
+
+  return false;
+}
+
+// --- Marketplace -----------------------------------------------------------
+//
+// Berbeda dari sumber "website" yang membuka URL mana pun, di sini host-nya
+// terkunci ke dua platform. Karena itu tidak ada penjagaan SSRF: tidak ada
+// masukan yang bisa mengarahkannya ke alamat internal.
+
+const MARKETPLACE_PLATFORMS = [
+  {
+    name: 'tokopedia',
+    host: /^(?:[a-z0-9-]+\.)?tokopedia\.com$/i,
+    // Jalur yang bukan toko. Tanpa daftar ini "tokopedia.com/search" dibaca
+    // sebagai toko bernama "search".
+    reserved: new Set([
+      'search', 'cart', 'help', 'about', 'promo', 'discovery', 'p', 'find',
+      'login', 'register', 'wishlist', 'order-list', 'contact-us', 'rewards'
+    ])
+  },
+  {
+    name: 'shopee',
+    // Shopee memakai domain berbeda per negara. Hanya shopee.co.id yang
+    // benar-benar diuji; yang lain mengikuti pola yang sama.
+    host: /^(?:[a-z0-9-]+\.)?shopee\.(?:co\.id|com|sg|ph|vn|co\.th|com\.my|com\.br|tw)$/i,
+    reserved: new Set([
+      'search', 'cart', 'daily-discover', 'buyer', 'seller', 'help', 'about',
+      'mall', 'product', 'shop', 'user', 'login', 'register', 'm', 'web'
+    ])
+  }
+];
+
+// Nama toko: huruf, angka, titik, garis bawah, strip.
+const STORE_SLUG = /^[a-z0-9._-]{1,64}$/i;
+
+/**
+ * Menguraikan "tokopedia.com/samsung", "https://shopee.co.id/samsung.id", dan
+ * bentuk sejenisnya menjadi { platform, slug, url }.
+ *
+ * Mengembalikan null untuk host di luar kedua platform, untuk jalur yang bukan
+ * toko (keranjang, pencarian, halaman produk), dan untuk masukan yang tidak
+ * menyebut host sama sekali — nama toko telanjang ambigu, karena "samsung" ada
+ * di kedua platform sebagai toko yang berbeda.
+ */
+export function marketplaceStore(value) {
+  if (typeof value !== 'string') return null;
+
+  const trimmed = value.trim();
+  if (!trimmed || /\s/.test(trimmed)) return null;
+
+  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+  let url;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return null;
+  }
+
+  if (!['http:', 'https:'].includes(url.protocol)) return null;
+
+  const platform = MARKETPLACE_PLATFORMS.find((entry) => entry.host.test(url.hostname));
+  if (!platform) return null;
+
+  const segments = url.pathname.split('/').filter(Boolean);
+  if (segments.length !== 1) return null;
+
+  const slug = segments[0];
+  if (platform.reserved.has(slug.toLowerCase())) return null;
+  if (!STORE_SLUG.test(slug)) return null;
+
+  return { platform: platform.name, slug, url: storeUrl(platform.name, slug) };
+}
+
+function storeUrl(platform, slug) {
+  const host = platform === 'tokopedia' ? 'www.tokopedia.com' : 'shopee.co.id';
+  return `https://${host}/${encodeURIComponent(slug)}`;
 }

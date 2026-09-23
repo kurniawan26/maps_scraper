@@ -234,3 +234,46 @@ export function extractProfile() {
     external_url: bioLink ? clean(bioLink.innerText) : null
   };
 }
+
+// Halaman web umum. Yang diambil hanya bahan untuk menjawab dua pertanyaan:
+// apakah halamannya hidup, dan apakah isinya cocok dengan nama yang dicari.
+// Bukan pengekstrak konten — tidak ada teks isi, tabel, maupun kontak di sini.
+export function extractPage() {
+  const clean = (value) => {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.replace(/\s+/g, ' ').trim();
+    return trimmed || null;
+  };
+
+  const meta = (selector, attribute = 'content') => {
+    const node = document.querySelector(selector);
+    return node ? clean(node.getAttribute(attribute)) : null;
+  };
+
+  const body = document.body ? document.body.innerText : '';
+
+  // Host tujuan tiap tautan. Dipakai mengenali halaman parkir, yang isinya
+  // nyaris kosong tetapi selalu menautkan ke layanan penjual domain.
+  const linkHosts = new Set();
+  for (const anchor of document.querySelectorAll('a[href]')) {
+    try {
+      linkHosts.add(new URL(anchor.href, location.href).hostname.replace(/^www\./, ''));
+    } catch {
+      // href yang tidak dapat diurai tidak memberi tahu apa-apa; lewati.
+    }
+  }
+
+  return {
+    title: clean(document.title),
+    heading: clean(document.querySelector('h1')?.textContent),
+    description:
+      meta('meta[name="description"]') || meta('meta[property="og:description"]'),
+    og_title: meta('meta[property="og:title"]'),
+    canonical: meta('link[rel="canonical"]', 'href'),
+    // Panjangnya dibatasi: yang dibutuhkan hanya cukup untuk membedakan halaman
+    // berisi dari halaman kosong, bukan seluruh isinya.
+    text_length: body.replace(/\s+/g, ' ').trim().length,
+    text_sample: clean(body.slice(0, 600)),
+    link_hosts: Array.from(linkHosts).slice(0, 40)
+  };
+}

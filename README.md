@@ -1,12 +1,16 @@
 # MapsScraper
 
 JSON API untuk memverifikasi keberadaan sebuah data — tempat di Google Maps,
-akun di Instagram — dari input yang bervariasi.
+akun di Instagram, halaman di web, toko di marketplace — dari input yang
+bervariasi.
 
-Aplikasi ini **hanya menyajikan JSON API**: tanpa frontend, database, email,
-maupun terjemahan. Dependensi untuk semua itu — esbuild, Tailwind, LiveView,
-Ecto/Postgres, Swoosh, Gettext — sengaja tidak dipasang, sehingga `mix setup`
-cukup mengunduh dependensi Elixir saja dan tidak menyiapkan database apa pun.
+Aplikasi ini **hanya menyajikan JSON API**: tanpa frontend, email, maupun
+terjemahan. Dependensi untuk semua itu — esbuild, Tailwind, LiveView, Swoosh,
+Gettext — sengaja tidak dipasang.
+
+Satu-satunya penyimpanan adalah **SQLite**, dipakai antrean validasi agar batch
+yang sedang berjalan selamat dari restart. Tidak ada server database yang perlu
+dijalankan: berkasnya cukup satu, dan produksinya tetap dua container.
 
 ## API
 
@@ -16,20 +20,26 @@ membuka halamannya, dan jawabannya selalu berbentuk `found` + `best_match`.
 ```
 klien  ->  Phoenix /api/places     ->  sidecar :3000 (Playwright)  ->  Google Maps
 klien  ->  Phoenix /api/instagram  ->  sidecar :3000 (Playwright)  ->  Instagram
+klien  ->  Phoenix /api/website    ->  sidecar :3000 (Playwright)  ->  situs mana pun
+klien  ->  Phoenix /api/marketplace ->  sidecar :3000               ->  Tokopedia / Shopee
 ```
 
 | Sumber | Endpoint | Pertanyaan yang dijawab |
 | ------ | -------- | ----------------------- |
 | Google Maps | `/api/places` | Apakah tempat ini benar-benar ada? |
 | Instagram | `/api/instagram` | Apakah akun ini ada, dan apakah milik usaha yang dimaksud? |
+| Website | `/api/website` | Apakah halaman ini hidup, dan apakah isinya cocok dengan usaha itu? |
+| Marketplace | `/api/marketplace` | Apakah toko ini ada di Tokopedia/Shopee, dan apakah miliknya? |
 
-Keduanya bisa dikirim sebagai batch lewat `/api/validations` — lihat
-[Validasi massal](#validasi-massal-antrean-job).
+Keempatnya bisa dipanggil satu per satu, **sekaligus lewat satu pintu**
+(`POST /api/validate` — lihat [Satu pintu](#satu-pintu-post-apivalidate)), atau
+sebagai batch lewat `/api/validations`.
 
 ### Menjalankan
 
 ```bash
 cp .env.example .env           # semua nilai sudah punya default, aman dibiarkan
+mix setup                      # unduh dependensi + siapkan berkas SQLite
 docker compose up -d --build   # sidecar Playwright di port 3000
 mix phx.server                 # Phoenix di port 4000
 curl http://localhost:4000/api/health
@@ -52,10 +62,135 @@ Seluruh variabel beserta penjelasannya ada di `.env.example`.
 | `POST` | `/api/places` | Verifikasi tempat lewat body JSON |
 | `GET`  | `/api/instagram?query=...` | Verifikasi akun Instagram lewat query string |
 | `POST` | `/api/instagram` | Verifikasi akun Instagram lewat body JSON |
-| `POST` | `/api/validations` | Batch, untuk kedua sumber |
+| `GET`  | `/api/website?query=...` | Verifikasi halaman web lewat query string |
+| `POST` | `/api/website` | Verifikasi halaman web lewat body JSON |
+| `GET`  | `/api/marketplace?query=...` | Verifikasi toko marketplace lewat query string |
+| `POST` | `/api/marketplace` | Verifikasi toko marketplace lewat body JSON |
+| `POST` | `/api/validate` | **Satu pintu** — seluruh kanal satu usaha sekaligus |
+| `POST` | `/api/validations` | Batch, untuk seluruh sumber |
 | `GET`  | `/api/health` | Status Phoenix + sidecar |
 
 Koleksi Postman siap pakai ada di `postman/` — lihat [Postman](#postman) di bawah.
+
+### Satu pintu: `POST /api/validate`
+
+Kalau yang ingin kamu validasi adalah **sebuah usaha**, bukan satu tautan, ini
+pintunya. Satu permintaan membawa nama usaha beserta tautan kanalnya, dan
+semuanya diperiksa paralel.
+
+```bash
+curl -X POST http://localhost:4000/api/validate \
+  -H "content-type: application/json" \
+  -d '{
+    "name": "Warung Sate Pak Budi",
+    "google_maps_url": "https://maps.app.goo.gl/xxxx",
+    "instagram_url": "instagram.com/warungsatepakbudi",
+    "website_url": "warungsate.com",
+    "tokopedia_url": "tokopedia.com/warungsatepakbudi",
+    "shopee_url": "shopee.co.id/warungsatepakbudi"
+  }'
+```
+
+Isi kanal seperlunya — minimal satu. Usaha tanpa website tinggal tidak mengisi
+fieldnya.
+
+| Field | Keterangan |
+| ----- | ---------- |
+| `name` | Nama usaha. **Ini yang membuat jawabannya berarti** — lihat di bawah |
+| `google_maps_url` | URL Google Maps. Menerima nama tempat, alamat, atau koordinat juga |
+| `instagram_url` | URL profil atau username saja |
+| `website_url` | URL atau nama domain |
+| `tokopedia_url` / `shopee_url` | URL toko. Platformnya diperiksa cocok dengan nama fieldnya |
+| `lang` / `country` | Diteruskan ke tiap kanal |
+
+#### Kenapa `name` menentukan segalanya
+
+Tautan yang hidup **belum berarti milik usaha yang kamu maksud**. Kalau data
+kamu menyimpan link Maps yang salah, kami tetap menemukan tempat di sana — hanya
+saja tempat itu bengkel motor, bukan warung sate.
+
+Karena itu `name` dibandingkan dengan apa pun yang ketemu di tiap kanal:
+
+| Yang terjadi | Vonis kanal |
+| ------------ | ----------- |
+| Tautan ketemu, namanya cocok | `match` — aman dipakai otomatis |
+| Tautan ketemu, namanya beda jauh | `no_match` — tautannya salah usaha |
+| Tautan tidak ketemu | `no_match` |
+| `name` tidak diisi | `review` — tidak ada pembanding, nilai sendiri |
+
+Ini **bukan** pencarian berdasarkan nama. Tiap kanal tetap diambil lewat tautan
+yang kamu berikan; `name` hanya dipakai menilai hasilnya. Tidak ada permintaan
+tambahan.
+
+#### Bentuk jawabannya
+
+```json
+{
+  "name": "Warung Sate Pak Budi",
+  "checked": 4,
+  "found": 4,
+  "errors": 0,
+  "verdicts": { "match": 3, "review": 1, "no_match": 0 },
+  "cross_check": {
+    "maps_website": "https://www.warungsate.com/",
+    "maps_phone": "021-1234567",
+    "website_matches_maps": true
+  },
+  "channels": {
+    "google_maps": { "status": "ok", "found": true, "best_match": 1, "verdict": "match",
+                     "results": [ { "name": "...", "address": "...", "phone": "...",
+                                    "website": "...", "opening_hours": [], "…": "…" } ] },
+    "instagram":   { "status": "ok", "found": true, "best_match": 1, "verdict": "match", "results": [ … ] },
+    "website":     { "status": "ok", "found": true, "best_match": 1, "verdict": "match", "results": [ … ] },
+    "tokopedia":   { "status": "ok", "found": true, "best_match": 1, "verdict": "match", "results": [ … ] }
+  }
+}
+```
+
+Hasil tiap kanal dibawa **utuh**, tidak dipangkas seperti pada endpoint batch —
+justru kolom lengkap itulah yang membuat pintu ini berguna.
+
+#### Validasi silang, gratis
+
+Listing Google Maps memuat website dan telepon yang **dideklarasikan usaha itu
+sendiri**. Keduanya dibandingkan dengan `website_url` yang kamu kirim dan
+dilaporkan di `cross_check`.
+
+Kalau keduanya cocok, itu bukti jauh lebih kuat daripada kemiripan nama — tidak
+bergantung pada ejaan. Datanya sudah ikut terbawa, jadi tidak ada permintaan
+tambahan.
+
+#### Satu kanal gagal tidak menjatuhkan yang lain
+
+Kanal yang tidak terbaca dilaporkan pada kanalnya sendiri, dan permintaannya
+**tetap `200`**:
+
+```json
+"shopee": { "status": "error", "retryable": true,
+            "error": { "code": "shopee_blocked", "message": "…" } }
+```
+
+Menggagalkan seluruh jawaban karena satu kanal sedang diblokir akan membuang
+tiga kanal yang sudah terjawab. Field `retryable` memberi tahu apakah layak
+dicoba lagi.
+
+Yang tetap dijawab `422` hanyalah masukan yang salah bentuk — dan ditolak
+**sebelum** satu pun kanal dijalankan, dengan menyebut field mana yang salah:
+
+```json
+{ "error": { "code": "invalid_params", "field": "tokopedia_url",
+             "message": "ini URL shopee, bukan tokopedia" } }
+```
+
+#### Biayanya
+
+Satu usaha memakai sampai **empat context browser** sekaligus — Tokopedia tidak
+memakai satu pun. Lamanya ditentukan kanal terlambat, jadi sekitar **3–4 detik**.
+
+Jaga `SUBJECT_MAX_CONCURRENCY` (default 4) tidak melebihi
+`MAX_CONCURRENT_SCRAPES`, kalau tidak sebagian kanal pada satu permintaan yang
+sama akan dijawab `busy`. Untuk volume besar, pakai endpoint batch — di sana
+`busy` ditangani antrean lewat `snooze`, bukan dilaporkan sebagai kegagalan.
 
 ### Parameter `/api/places`
 
@@ -281,6 +416,241 @@ yang dibutuhkan adalah proxy residensial di depan sidecar — bukan perubahan ko
 Penyedia data dapat ditukar tanpa menyentuh context, antrean, maupun controller;
 lihat `MapsScraper.Instagram.Provider`.
 
+### Website `/api/website`
+
+Memastikan apakah sebuah halaman web hidup, dari URL lengkap maupun nama domain
+telanjang. Menjawab dua hal saja: **hidup atau mati**, dan **cocok atau tidak**
+dengan nama yang dicari. Ini bukan pengekstrak konten — tidak ada teks isi,
+tabel, kontak, maupun selektor CSS.
+
+| Nama | Tipe | Default | Keterangan |
+| ---- | ---- | ------- | ---------- |
+| `query` | string | *wajib* | URL lengkap atau nama domain (`warungsate.com`) |
+| `name` | string | — | Nama yang diharapkan, mis. nama usaha. Tanpa ini `best_match` bernilai `null` |
+| `lang` | string | `id` | Bahasa halaman |
+| `country` | string | `ID` | Region halaman |
+
+Domain telanjang dinaikkan ke `https` lebih dulu. Kalau gagal di lapis koneksi
+atau sertifikat, sekali dicoba lewat `http` — banyak situs usaha kecil belum
+berpindah, dan itu bukan alasan menyatakannya mati.
+
+```bash
+# domain telanjang
+curl "http://localhost:4000/api/website?query=warungsate.com"
+
+# apakah halaman ini milik usaha bernama X?
+curl -X POST http://localhost:4000/api/website \
+  -H "content-type: application/json" \
+  -d '{"query": "warungsate.com", "name": "Warung Sate Pak Budi"}'
+```
+
+```json
+{
+  "type": "website",
+  "input_type": "domain",
+  "query": "warungsate.com",
+  "found": true,
+  "best_match": 1,
+  "count": 1,
+  "reason": null,
+  "results": [
+    {
+      "url": "https://warungsate.com/",
+      "final_url": "https://www.warungsate.com/",
+      "status": 200,
+      "title": "Warung Sate Pak Budi - Sate Kambing Jakarta",
+      "description": "Sate kambing sejak 1998",
+      "redirected": false,
+      "parked": false,
+      "reason": null,
+      "match": 1
+    }
+  ]
+}
+```
+
+Tanpa `name`, `best_match` bernilai `null` — tidak ada yang bisa dibandingkan,
+dan barisnya masuk `review` persis seperti input URL pada `/api/places`. Isi
+`name` kalau yang ingin dijawab adalah "apakah halaman ini benar milik usaha X".
+
+#### Tiga keadaan, bukan dua
+
+| Keadaan | Contoh | Jawaban API |
+| ------- | ------ | ----------- |
+| Hidup | `200`, halaman berisi | `200`, `found: true` |
+| Mati | DNS tidak ada, koneksi ditolak, `404`/`410`, domain parkir | `200`, `found: false` + `reason` |
+| **Tidak terbaca** | timeout, `5xx`, atau `401`/`403`/`429` | `503`, `website_*` |
+
+`401`/`403`/`429` sengaja **tidak** dihitung mati. Ketiganya berarti halamannya
+ada tetapi kita tidak diizinkan melihatnya — biasanya karena situsnya memblokir
+bot. Memvonisnya mati akan menghapus website yang sebenarnya hidup.
+
+Nilai `reason` yang mungkin saat `found: false`: `dns_not_found`,
+`connection_refused`, `unreachable`, `tls_error`, `too_many_redirects`,
+`parked`, dan `http_<status>`.
+
+#### Domain parkir
+
+Domain yang sudah dijual atau diparkir dijawab `found: false` dengan
+`reason: "parked"`. Pengenalannya sengaja dibuat sempit — hanya frasa penjualan
+yang eksplisit, atau tautan ke layanan parkir pada halaman yang memang kosong.
+Halaman "coming soon" dan "under construction" **tidak** dihitung parkir; halaman
+seperti itu memang hidup, hanya belum berisi. Salah tuduh di sini menghapus
+website usaha yang sebenarnya ada, jadi ambangnya dipasang tinggi.
+
+#### Alamat internal ditolak
+
+Berbeda dari dua sumber lain yang host-nya terkunci ke Google dan Instagram,
+sumber ini membuka URL yang ditentukan pemanggil. Tanpa penjagaan, siapa pun
+yang dapat memanggil API ini bisa memakainya sebagai perantara untuk menjangkau
+apa yang hanya terlihat dari dalam jaringan — inilah SSRF.
+
+Yang ditolak dengan `403 blocked_address`:
+
+| Golongan | Contoh |
+| -------- | ------ |
+| Loopback | `127.0.0.1`, `::1`, `localhost` |
+| Jaringan privat | `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` |
+| Link-local & metadata cloud | `169.254.169.254` |
+| CGNAT dan rentang cadangan | `100.64.0.0/10`, `0.0.0.0/8`, multicast |
+| IPv6 internal | `fc00::/7`, `fe80::/10`, `::ffff:127.0.0.1` |
+
+Tiga hal yang membuatnya bukan sekadar daftar hitam nama:
+
+1. **Yang diperiksa adalah alamat hasil resolusi, bukan namanya.** Domain publik
+   bisa saja diarahkan ke `127.0.0.1` — dan `localtest.me` memang begitu.
+   Pemeriksaan berbasis nama tidak akan melihatnya.
+2. **Tiap lompatan pengalihan ikut diperiksa.** Rantai pengalihan diselesaikan
+   lebih dulu di luar browser, karena `route.continue()` pada Playwright hanya
+   memanggil handler untuk request pertama — pengalihan sesudahnya diikuti
+   browser tanpa melewatinya lagi. URL publik yang mengalihkan ke `169.254.169.254`
+   karena itu tetap tertahan.
+3. **Skema selain `http`/`https` ditolak**, termasuk bila muncul sebagai tujuan
+   pengalihan.
+
+Pemeriksaannya berjalan dua kali: di Phoenix sebelum permintaan dikirim, dan di
+sidecar untuk tiap lompatan. Baris batch yang menunjuk alamat internal ditolak
+`422` di depan, bukan setelah job diterima.
+
+**Sisa risiko yang diketahui:** sub-resource halaman (script, stylesheet) hanya
+diperiksa pada host langsungnya. Sub-resource yang mengalihkan ke alamat internal
+masih bisa menghasilkan satu permintaan, meski isinya tidak pernah dibaca maupun
+dikembalikan. Kalau service ini dibuka ke pemanggil yang tidak tepercaya,
+tempatkan sidecar di jaringan yang memang tidak punya akses ke apa pun.
+
+#### Biayanya
+
+Halaman mati dijawab tanpa membuka browser sama sekali — cukup satu permintaan
+HTTP, sekitar 0,2 detik. Halaman hidup butuh satu context Chromium karena judul
+pada situs SPA baru terisi setelah JavaScript-nya jalan; hitungannya 1–3 detik.
+
+### Marketplace `/api/marketplace`
+
+Memastikan apakah sebuah toko ada di **Tokopedia** atau **Shopee**. Platform
+ditentukan dari host, jadi masukannya wajib berupa URL toko — bukan nama toko
+telanjang.
+
+```bash
+curl "http://localhost:4000/api/marketplace?query=tokopedia.com/samsung&name=Samsung"
+curl "http://localhost:4000/api/marketplace?query=shopee.co.id/samsung.id"
+```
+
+| Nama | Tipe | Default | Keterangan |
+| ---- | ---- | ------- | ---------- |
+| `query` | string | *wajib* | URL toko, mis. `tokopedia.com/samsung`. Skema boleh dihilangkan |
+| `name` | string | — | Nama yang diharapkan. Tanpa ini `best_match` bernilai `1` saat toko ditemukan |
+| `lang` / `country` | string | `id` / `ID` | Bahasa dan region halaman |
+
+**Nama toko telanjang ditolak.** `samsung` ada di kedua platform sebagai toko
+yang berbeda, jadi `"samsung"` tidak punya jawaban tunggal. Sebutkan host-nya.
+
+```json
+{
+  "type": "marketplace",
+  "platform": "shopee",
+  "query": "shopee.co.id/samsung.id",
+  "found": true,
+  "best_match": 1,
+  "count": 1,
+  "reason": null,
+  "results": [
+    {
+      "platform": "shopee",
+      "slug": "samsung.id",
+      "store_name": "Sam Sung ID",
+      "store_url": "https://shopee.co.id/samsung.id",
+      "shop_id": 326058955,
+      "followers": 2,
+      "items": 2,
+      "rating": 0,
+      "match": 1
+    }
+  ]
+}
+```
+
+Kolom `shop_id`, `followers`, `items`, dan `rating` hanya terisi untuk Shopee —
+Tokopedia tidak menyediakannya lewat jalur yang dipakai di sini.
+
+#### Dua platform, dua cara baca yang berlawanan
+
+Ini hasil pengukuran, bukan pilihan gaya:
+
+| | Tokopedia | Shopee |
+| --- | --- | --- |
+| HTTP biasa | **berhasil** — `og:title` memuat nama toko | shell identik untuk toko ada maupun tidak |
+| Browser | **ditolak** — `ERR_HTTP2_PROTOCOL_ERROR` | satu-satunya jalan |
+| Toko tidak ada | **`410 Gone`** | API membalas `error: 1000000` |
+| Biaya per baris | **~0,3–1 dtk, tanpa context Chromium** | ~2–4 dtk, satu context |
+
+Karena Tokopedia tidak memakai browser sama sekali, barisnya **tidak ikut
+menghitung slot `MAX_CONCURRENT_SCRAPES`**. Batch Tokopedia karena itu jauh
+lebih murah daripada sumber lain mana pun di proyek ini.
+
+Shopee tidak pernah merender nama toko untuk kita dan API-nya menolak permintaan
+biasa dengan `403`. Tetapi di dalam browser, API yang sama dipanggil
+frontend-nya sendiri dan berhasil — jadi halamannya dibuka, lalu responsnya
+disadap.
+
+#### Verifikasi bot Tokopedia
+
+Sebagian toko Tokopedia dilindungi Bot Manager Akamai. Yang dikirim bukan status
+error, melainkan halaman `200` berukuran kecil berisi meta-refresh ke URL
+ber-token `bm-verify`. Perilakunya konsisten per toko, bukan acak: `samsung`
+selalu ditantang, `erafone` tidak pernah.
+
+Tantangan itu dijawab otomatis — URL-nya diikuti sekali dengan cookie yang baru
+diberikan, dan halaman aslinya didapat. Kalau tantangannya masih muncul setelah
+dijawab, jawabannya `503 tokopedia_challenged`: **tidak terbaca, bukan tidak
+ada**.
+
+#### Shopee: kode error yang generik
+
+Shopee menjawab toko yang tidak ada dengan `error: 1000000, error_msg:
+"service_err"` — konsisten pada seluruh pengujian, tetapi namanya jelas bukan
+"toko tidak ada". Kode yang sama bisa saja muncul saat layanannya bermasalah.
+
+Karena itu jawaban semacam itu **dikonfirmasi sekali lagi** sebelum divonis:
+gangguan sesaat jarang terulang persis, sedangkan toko yang memang tidak ada
+selalu menjawab sama. Itu sebabnya toko Shopee yang tidak ada memakan waktu
+sekitar dua kali lipat (~4 dtk) dibanding yang ada (~2 dtk).
+
+Kalau API-nya tidak pernah terpanggil sama sekali — kita diblokir, atau
+halamannya tidak selesai — jawabannya `503 shopee_blocked`, dan antrean yang
+mengulangnya.
+
+#### Bagian paling rapuh di proyek ini
+
+Jujur saja: pembacaan Shopee bergantung pada **API internal tanpa dokumentasi**
+(`/api/v4/shop/get_shop_base_v2`) yang bentuknya bisa berubah kapan saja tanpa
+pemberitahuan. Tokopedia jauh lebih aman karena bersandar pada `og:title` dan
+status HTTP standar.
+
+Kalau suatu hari batch Shopee mulai mengembalikan `shopee_blocked` secara
+menyeluruh, periksa dulu apakah nama endpoint atau bentuk responsnya berubah —
+itu penyebab yang paling mungkin, dan bukan sesuatu yang bisa dicegah dari sisi
+sini.
+
 ### Error
 
 ```json
@@ -294,12 +664,17 @@ lihat `MapsScraper.Instagram.Provider`.
 | `503` | `busy` | Sidecar sedang penuh; ulangi sesuai header `Retry-After` |
 | `503` | `instagram_blocked` | Instagram menolak melayani; ulangi nanti |
 | `503` | `instagram_unreadable` | Profil tidak terbaca dalam batas waktu; ulangi nanti |
+| `403` | `blocked_address` | URL menunjuk alamat internal; permanen, jangan diulang |
+| `503` | `website_timeout` | Halaman tidak terbuka dalam batas waktu; ulangi nanti |
+| `503` | `website_http_<status>` | Server tujuan menjawab 401/403/429/5xx; ulangi nanti |
+| `503` | `tokopedia_challenged` | Tokopedia meminta verifikasi bot; ulangi nanti |
+| `503` | `shopee_blocked` | Shopee tidak mengembalikan data toko; ulangi nanti |
 | `504` | `timeout` | Scraping melewati batas waktu |
 
-Tempat atau akun yang tidak ditemukan **bukan** error: statusnya tetap `200`
-dengan `found: false`. Sebaliknya, dua kode `instagram_*` di atas berarti
-*tidak tahu*, bukan *tidak ada* — jangan pernah menerjemahkannya jadi
-`found: false`.
+Tempat, akun, atau halaman yang tidak ditemukan **bukan** error: statusnya tetap
+`200` dengan `found: false`. Sebaliknya, kode `instagram_*` dan `website_*` di
+atas berarti *tidak tahu*, bukan *tidak ada* — jangan pernah menerjemahkannya
+jadi `found: false`.
 
 ### Daur hidup browser
 
@@ -445,9 +820,8 @@ beban yang paling mungkin Anda jalankan.
 ### Validasi massal (antrean job)
 
 Untuk memeriksa banyak query sekaligus, kirim satu batch dan ambil hasilnya
-belakangan. Pekerjaannya dijalankan `MapsScraper.Validation.Queue` — sebuah
-GenServer yang menahan seluruh job di state-nya dan menjalankan paling banyak
-`concurrency` query bersamaan.
+belakangan. Tiap baris menjadi satu job **Oban** yang tersimpan di SQLite, dan
+paling banyak `VALIDATION_CONCURRENCY` baris dikerjakan bersamaan.
 
 ```bash
 # kirim batch -> 202 Accepted
@@ -466,6 +840,16 @@ curl http://localhost:4000/api/validations
 curl -X POST http://localhost:4000/api/validations \
   -H "content-type: application/json" \
   -d '{"source": "instagram", "queries": ["kournicloud", "natgeo"], "name": "Kurniawan"}'
+
+# batch website
+curl -X POST http://localhost:4000/api/validations \
+  -H "content-type: application/json" \
+  -d '{"source": "website", "queries": ["warungsate.com", "contoh.co.id"], "name": "Warung Sate Pak Budi"}'
+
+# batch marketplace
+curl -X POST http://localhost:4000/api/validations \
+  -H "content-type: application/json" \
+  -d '{"source": "marketplace", "queries": ["tokopedia.com/samsung", "shopee.co.id/samsung.id"], "name": "Samsung"}'
 ```
 
 | Method | Path | Keterangan |
@@ -480,15 +864,18 @@ curl -X POST http://localhost:4000/api/validations \
 | -------- | ------------- | ----------------- |
 | `maps` (default) | Nama tempat, alamat, koordinat, URL Maps | `limit`, `detail`, `lang`, `country` |
 | `instagram` | Username atau URL profil | `name`, `lang`, `country` |
+| `website` | URL lengkap atau nama domain | `name`, `lang`, `country` |
+| `marketplace` | URL toko Tokopedia/Shopee | `name`, `lang`, `country` |
 
 Satu batch memeriksa satu sumber. Mencampurnya sengaja tidak didukung: opsi tiap
 sumber berbeda, dan yang memanggil endpoint ini biasanya sedang memeriksa satu
 kolom dari satu tabel.
 
-Untuk `instagram`, baris yang bukan username maupun URL profil ditolak di depan
+Untuk `instagram` dan `website`, baris yang bentuknya tidak sah ditolak di depan
 dengan `422` — bukan diterima lalu gagal satu per satu. Baris seperti itu tidak
 akan pernah berhasil betapa pun sering diulang, jadi memberi tahu sekarang lebih
 jujur daripada membuat klien menunggu hasil polling yang sudah pasti sia-sia.
+Untuk `website` itu termasuk baris yang menunjuk alamat internal.
 
 Opsi `name` berlaku untuk **seluruh batch**. Kalau tiap baris punya nama
 pembanding sendiri, kirim satu batch per nama — atau pakai `/api/instagram`
@@ -496,7 +883,10 @@ per baris.
 
 Bentuk kandidatnya mengikuti sumbernya. Untuk `maps` berisi `place_id`/`cid`/
 `ftid` dan koordinat; untuk `instagram` berisi `username`, `full_name`,
-`profile_url`, `followers`, `verified`, dan `private`.
+`profile_url`, `followers`, `verified`, dan `private`; untuk `website` berisi
+`url`, `final_url`, `status`, `title`, `description`, `redirected`, dan `parked`;
+untuk `marketplace` berisi `platform`, `slug`, `store_name`, `store_url`, dan —
+khusus Shopee — `shop_id`, `followers`, `items`, `rating`.
 
 Hasil tiap baris dipadatkan ke jawaban validasinya — `found`, `best_match`,
 `verdict`, dan beberapa **kandidat** terurut dari yang paling cocok. Untuk daftar
@@ -594,8 +984,10 @@ Kegagalan **sementara** diulang otomatis dengan jeda yang menggandakan diri
 | Sidecar mati / tidak dapat dihubungi | ya |
 | Timeout scraping | ya |
 | Error 5xx dari sidecar | ya |
-| Task-nya sendiri mati (crash, OOM) | ya |
+| Context-nya sendiri meledak | ya |
+| Sidecar penuh (`503 busy`) | ya — dan **tanpa menghabiskan jatah percobaan** |
 | Parameter tidak valid | **tidak** — hasilnya tidak akan berubah |
+| URL menunjuk alamat internal | **tidak** — tidak akan berubah jadi publik |
 
 Selama menunggu giliran ulang, barisnya berstatus `pending` dan membawa
 `last_error` sehingga penyebabnya terlihat tanpa harus membuka log:
@@ -605,10 +997,7 @@ Selama menunggu giliran ulang, barisnya berstatus `pending` dan membawa
   "last_error": { "code": "scraper_unavailable", "message": "Sidecar tidak dapat dihubungi" } }
 ```
 
-Tiap baris dikerjakan task terpisah di bawah `Task.Supervisor` dan disambungkan
-dengan `async_nolink/3`, sehingga task yang mati tidak menjatuhkan antrean —
-kematiannya diperlakukan sebagai kegagalan sementara. Satu baris yang gagal juga
-tidak menggagalkan baris lain dalam batch yang sama.
+Satu baris yang gagal tidak menggagalkan baris lain dalam batch yang sama.
 
 #### Setelan
 
@@ -616,34 +1005,114 @@ Lewat environment, tanpa rebuild:
 
 | Variabel | Default | Keterangan |
 | -------- | ------- | ---------- |
-| `VALIDATION_CONCURRENCY` | `3` | Query diproses bersamaan. Jangan melebihi kapasitas sidecar |
+| `VALIDATION_CONCURRENCY` | `3` | Ukuran antrean Oban: baris diproses bersamaan. Jangan melebihi kapasitas sidecar |
+| `DATABASE_PATH` | *(lihat bawah)* | Berkas SQLite antrean. Di Docker **wajib** menunjuk volume |
 | `VALIDATION_MAX_ATTEMPTS` | `3` | Termasuk percobaan pertama (jadi 3 = 1 jalan + 2 ulang) |
 | `VALIDATION_BACKOFF_MS` | `1000` | Jeda dasar sebelum percobaan ulang |
 | `VALIDATION_MAX_BACKOFF_MS` | `30000` | Batas atas jeda |
 | `VALIDATION_MAX_BATCH` | `500` | Baris maksimum per batch |
-| `VALIDATION_JOB_TTL_MS` | `900000` | Hasil job bisa diambil selama ini setelah selesai. `0` mematikan |
-| `VALIDATION_MAX_JOBS` | `1000` | Batas jumlah job tersimpan. `0` mematikan |
+| `VALIDATION_JOB_TTL_MS` | `86400000` | Hasil batch bisa diambil selama ini setelah selesai (1 hari). `0` mematikan |
+| `VALIDATION_CLEANUP_CRON` | `0 20 * * *` | Jadwal penyapuan harian, notasi cron **UTC** (= 03.00 WIB) |
+| `VALIDATION_MAX_JOBS` | `1000` | Batas jumlah batch tersimpan. `0` mematikan |
 | `VALIDATION_MAX_CANDIDATES` | `5` | Kandidat yang dibawa tiap baris hasil |
 | `VALIDATION_MATCH_THRESHOLD` | `0.8` | Di atas ini divonis `match` |
 | `VALIDATION_REVIEW_THRESHOLD` | `0.3` | Di bawah ini divonis `no_match` |
 | `VALIDATION_AMBIGUITY_MARGIN` | `0.1` | Selisih skor dua kandidat teratas yang masih dianggap berimpit |
 
-#### Batasan yang perlu diketahui
+#### Ketahanan terhadap restart
 
-Antrean ini ada **di memori**. Kalau aplikasi di-restart, job yang belum selesai
-ikut hilang dan `GET /api/validations/:id` membalas `404`. Untuk fase development
-itu sepadan dengan kesederhanaannya.
+Antrean berjalan di atas **Oban dengan SQLite** (`Oban.Engines.Lite`), jadi
+batch tersimpan di disk, bukan di memori proses. Yang terjadi saat aplikasi
+berhenti di tengah batch:
 
-Karena itu pula hasil job **tidak disimpan selamanya**: setelah `VALIDATION_JOB_TTL_MS`
-lewat, job dibuang dan id-nya membalas `404`. Kalau jumlah job melewati
-`VALIDATION_MAX_JOBS`, yang dibuang lebih dulu adalah job selesai yang paling tua —
-job yang masih berjalan tidak pernah dikorbankan. Ambil hasilnya sebelum TTL habis.
+| Cara berhenti | Yang terjadi |
+| ------------- | ------------ |
+| `docker stop` / SIGTERM | Oban menuntaskan baris yang sedang jalan, sisanya menunggu di antrean dan dilanjutkan setelah start |
+| Mati mendadak (OOM, SIGKILL, mesin padam) | Baris yang menunggu langsung dilanjutkan. Baris yang sedang jalan dibebaskan **saat start berikutnya**, lalu dikerjakan ulang |
 
-Sebelum dipakai produksi, job perlu disimpan di penyimpanan yang tahan restart
-agar batch panjang tidak hilang saat deploy dan bisa dikerjakan beberapa node
-sekaligus. Perlu diingat proyek ini **tidak lagi memasang Ecto/Postgres**, jadi
-langkah itu berarti menambahkan kembali `ecto_sql` + `postgrex` (atau memakai
-penyimpanan lain), bukan sekadar memindahkan state.
+Terukur: batch 12 baris di-`SIGKILL` saat 2 baris selesai — 7 menunggu, 3 sedang
+jalan. Setelah start ulang, batch selesai penuh 12/12 dalam hitungan detik.
+
+Pembebasan job yatim saat start itu aman **karena deployment ini satu node**:
+tidak mungkin ada pekerja lain yang sedang memegangnya. `Oban.Plugins.Lifeline`
+tetap dipasang sebagai jaring pengaman kalau pekerjanya mati sementara
+aplikasinya sendiri masih hidup.
+
+#### Sidecar penuh tidak lagi merusak data
+
+Saat sidecar menolak dengan `503 busy`, job **di-snooze**, bukan dihitung gagal.
+Oban mengembalikan hitungan percobaan setiap kali job di-snooze, sehingga
+kemacetan yang kita timbulkan sendiri tidak pernah menghabiskan jatah retry
+milik kegagalan yang sesungguhnya.
+
+Ini memperbaiki perilaku yang sebelumnya merusak: dengan antrean lama, menuntut
+concurrency lebih dari kapasitas sidecar membuat baris **yang datanya sehat**
+divonis gagal setelah percobaan ketiga. Terukur pada setelan cap=2 vs
+concurrency=8: 5 dari 8 baris gagal sebagai `busy`, termasuk akun yang jelas ada.
+
+Aturan kapasitasnya tetap berlaku dan tetap layak dijaga — `snooze` membuat
+pelanggarannya tidak merusak, bukan membuat sidecar sanggup melayani lebih
+banyak:
+
+```
+MAX_CONCURRENT_SCRAPES  ≥  VALIDATION_CONCURRENCY × context_per_baris
+```
+
+#### Retensi hasil
+
+Hasil batch **tidak disimpan selamanya**: setelah `VALIDATION_JOB_TTL_MS`
+(default **1 hari**) lewat, batch dibuang dan id-nya membalas `404`. Kalau
+jumlah batch melewati `VALIDATION_MAX_JOBS`, yang dibuang lebih dulu adalah
+batch selesai yang paling tua — batch yang masih berjalan tidak pernah
+dikorbankan.
+
+Penyapuan berjalan dari **dua arah**, dan keduanya perlu:
+
+| Kapan | Kenapa |
+| ----- | ------ |
+| Saat batch baru masuk | Membersihkan tepat ketika ruang dibutuhkan |
+| Terjadwal, sekali sehari | Yang pertama tidak pernah jalan kalau trafiknya berhenti — dan justru pada masa sepi itulah data mengendap paling lama |
+
+Jadwalnya diatur `VALIDATION_CLEANUP_CRON`, dalam notasi cron **UTC**. Bawaannya
+`0 20 * * *`, yang sama dengan pukul 03.00 WIB. (Oban butuh basis data zona
+waktu untuk zona selain UTC — dependensi yang tidak sebanding untuk satu
+pekerjaan harian.)
+
+Batch yang **tidak pernah selesai** — pekerjanya hilang, atau job-nya dibuang
+sebelum sempat menandai barisnya — ikut dibuang setelah tujuh kali TTL. Tanpa
+jaring itu, batch seperti itu tidak memenuhi syarat penghapusan mana pun dan
+mengendap selamanya.
+
+#### Menghapus baris saja tidak mengecilkan berkasnya
+
+SQLite di sini berjalan dengan `auto_vacuum = NONE`. Halaman bekas baris yang
+dihapus masuk ke *freelist* dan dipakai ulang, tetapi **berkasnya tidak pernah
+menyusut** — ia berhenti di ukuran tertinggi yang pernah dicapai. Satu batch
+besar sekali saja cukup untuk membuatnya besar selamanya.
+
+Terukur, dengan 200 batch × 25 baris berisi hasil berkolom lengkap:
+
+| Tahap | Ukuran berkas |
+| ----- | ------------- |
+| Kosong | 0,04 MB |
+| Terisi 5.000 baris | 3,52 MB |
+| Sesudah `DELETE` semuanya | **3,52 MB** — tidak berubah, 890 halaman menganggur |
+| Sesudah `VACUUM` | **0,04 MB** (7 ms) |
+
+Karena itu penyapuan terjadwal diikuti `VACUUM`. Ia mengunci database selama
+berjalan dan tidak boleh berada di dalam transaksi, jadi hanya dijalankan pada
+penyapuan harian — bukan pada tiap batch yang masuk — dan hanya kalau memang
+ada yang terhapus.
+
+Kalau `VACUUM` gagal, penyapuannya tetap dianggap berhasil: yang batal hanyalah
+pengembalian ruang disk, bukan penghapusan datanya.
+
+#### Kalau kelak perlu lebih dari satu node
+
+SQLite mengikat antrean ke satu mesin. Menjalankan beberapa instance berarti
+pindah ke Postgres: `Oban.Engines.Lite` diganti `Oban.Engines.Basic`, tambahkan
+`postgrex`, dan hapus pembebasan job yatim saat start — dengan banyak node,
+job berstatus `executing` belum tentu yatim. Selebihnya tidak berubah.
 
 ### Menjalankan seluruhnya di Docker
 

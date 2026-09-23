@@ -34,3 +34,9 @@ scraper/node_modules/
 .env
 .env.*
 !.env.example
+
+# Berkas SQLite antrean validasi. Isinya milik masing-masing mesin, dan di
+# produksi hidup di volume Docker — bukan sesuatu yang dibagikan lewat git.
+*.db
+*.db-shm
+*.db-wal

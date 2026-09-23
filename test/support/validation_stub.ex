@@ -15,6 +15,7 @@ defmodule MapsScraper.ValidationStub do
     * `"invalid"`          — gagal permanen (parameter tidak valid)
     * `"timeout"`          — gagal sementara terus-menerus
     * `"flaky:<n>:<nama>"` — gagal sementara `n` kali, lalu berhasil
+    * `"busy:<n>:<nama>"`  — sidecar penuh `n` kali, lalu berhasil
     * `"crash"`            — task-nya mati
 
   Dengan `"source" => "instagram"` pemisahnya titik, bukan titik dua, karena
@@ -25,6 +26,18 @@ defmodule MapsScraper.ValidationStub do
     * `"notfound.<username>"` — akun tidak ada
     * `"blocked"`             — Instagram menolak melayani; kegagalan sementara
       yang harus diulang, bukan "akun tidak ada"
+
+  Dengan `"source" => "website"` query harus berupa URL yang sah:
+
+    * `"https://ok.<host>/"`         — halaman hidup
+    * `"https://notfound.<host>/"`   — halaman mati
+    * `"https://unreadable.<host>/"` — server memblokir kita; harus diulang
+
+  Dengan `"source" => "marketplace"` query wajib menyebut host:
+
+    * `"https://www.tokopedia.com/ok<slug>"`       — toko ada
+    * `"https://www.tokopedia.com/notfound<slug>"` — toko tidak ada
+    * `"https://shopee.co.id/blocked<slug>"`       — Shopee menolak; harus diulang
   """
 
   @table :validation_stub_attempts
@@ -37,7 +50,99 @@ defmodule MapsScraper.ValidationStub do
   end
 
   def lookup(%{"query" => query} = params) do
-    if params["source"] == "instagram", do: instagram(query), else: maps(query)
+    case params["source"] do
+      "instagram" -> instagram(query)
+      "website" -> website(query)
+      "marketplace" -> marketplace(query)
+      _ -> maps(query)
+    end
+  end
+
+  # Host memakai TLD .invalid, yang menurut RFC 6761 tidak pernah diresolusi.
+  # Itu membuat pemeriksaan alamat di MapsScraper.Website melewatkannya tanpa
+  # menyentuh DNS sungguhan, dan hasilnya sama di mesin mana pun.
+  # Query marketplace wajib menyebut host, jadi prefiksnya ada pada slug toko.
+  defp marketplace("https://www.tokopedia.com/ok" <> slug) do
+    {:ok, store_payload("tokopedia", "ok#{slug}", found: true, best_match: 1)}
+  end
+
+  defp marketplace("https://www.tokopedia.com/notfound" <> slug) do
+    {:ok, store_payload("tokopedia", "notfound#{slug}", found: false, best_match: 0)}
+  end
+
+  defp marketplace("https://shopee.co.id/blocked" <> _slug) do
+    {:error,
+     {:scraper, 503,
+      %{"code" => "shopee_blocked", "message" => "Shopee tidak mengembalikan data toko"}}}
+  end
+
+  defp marketplace(other), do: maps(other)
+
+  defp store_payload(platform, slug, opts) do
+    %{
+      "type" => "marketplace",
+      "platform" => platform,
+      "input_type" => "url",
+      "found" => opts[:found],
+      "best_match" => opts[:best_match],
+      "count" => if(opts[:found], do: 1, else: 0),
+      "reason" => if(opts[:found], do: nil, else: "store_not_found_410"),
+      "results" => if(opts[:found], do: [store(platform, slug, opts[:best_match])], else: [])
+    }
+  end
+
+  defp store(platform, slug, match) do
+    %{
+      "platform" => platform,
+      "slug" => slug,
+      "store_name" => "Toko #{slug}",
+      "store_url" => "https://www.tokopedia.com/#{slug}",
+      "shop_id" => nil,
+      "followers" => nil,
+      "items" => nil,
+      "rating" => nil,
+      "match" => match
+    }
+  end
+
+  defp website("https://ok." <> rest) do
+    {:ok, site_payload(String.trim_trailing(rest, "/"), found: true, best_match: 1)}
+  end
+
+  defp website("https://notfound." <> rest) do
+    {:ok, site_payload(String.trim_trailing(rest, "/"), found: false, best_match: 0)}
+  end
+
+  defp website("https://unreadable." <> _rest) do
+    {:error, {:scraper, 503, %{"code" => "website_http_403", "message" => "Server menjawab 403"}}}
+  end
+
+  defp website(other), do: maps(other)
+
+  defp site_payload(host, opts) do
+    %{
+      "type" => "website",
+      "input_type" => "url",
+      "found" => opts[:found],
+      "best_match" => opts[:best_match],
+      "count" => if(opts[:found], do: 1, else: 0),
+      "reason" => if(opts[:found], do: nil, else: "http_404"),
+      "results" => if(opts[:found], do: [site(host, opts[:best_match])], else: [])
+    }
+  end
+
+  defp site(host, match) do
+    %{
+      "url" => "https://ok.#{host}/",
+      "final_url" => "https://ok.#{host}/",
+      "status" => 200,
+      "title" => "Situs #{host}",
+      "description" => "Deskripsi #{host}",
+      "redirected" => false,
+      "parked" => false,
+      "reason" => nil,
+      "match" => match
+    }
   end
 
   # Bentuk payload Instagram berbeda dari Maps — kandidatnya akun, bukan tempat.
@@ -99,12 +204,27 @@ defmodule MapsScraper.ValidationStub do
       "server_error" -> {:error, {:scraper, 502, %{"code" => "scrape_failed"}}}
       "crash" -> exit(:boom)
       "flaky:" <> rest -> flaky(query, rest)
+      "busy:" <> rest -> busy(query, rest)
       other -> {:ok, payload(other, found: true, best_match: 1)}
     end
   end
 
   @doc "Berapa kali sebuah query sudah dipanggil."
   def attempts(query), do: :ets.update_counter(@table, query, {2, 0}, {query, 0})
+
+  # Sidecar penuh `n` kali, lalu berhasil. Dipakai membuktikan bahwa kemacetan
+  # yang kita timbulkan sendiri tidak menghabiskan jatah retry.
+  defp busy(query, rest) do
+    [threshold, name] = String.split(rest, ":", parts: 2)
+    count = :ets.update_counter(@table, query, {2, 1}, {query, 0})
+
+    if count > String.to_integer(threshold) do
+      {:ok, payload(name, found: true, best_match: 1)}
+    else
+      {:error,
+       {:scraper, 503, %{"code" => "busy", "message" => "Sidecar sedang menangani 4 permintaan"}}}
+    end
+  end
 
   defp flaky(query, rest) do
     [threshold, name] = String.split(rest, ":", parts: 2)

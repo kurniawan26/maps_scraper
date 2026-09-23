@@ -73,14 +73,54 @@ if instagram_overrides != [] do
   config :maps_scraper, :instagram, instagram_overrides
 end
 
+if max_concurrency = env_int.("SUBJECT_MAX_CONCURRENCY") do
+  config :maps_scraper, :subject, max_concurrency: max_concurrency
+end
+
+marketplace_overrides =
+  [timeout: env_int.("MARKETPLACE_TIMEOUT_MS")]
+  |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+
+if marketplace_overrides != [] do
+  config :maps_scraper, :marketplace, marketplace_overrides
+end
+
+website_overrides =
+  [timeout: env_int.("WEBSITE_TIMEOUT_MS")]
+  |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+
+if website_overrides != [] do
+  config :maps_scraper, :website, website_overrides
+end
+
 # Antrean validasi massal dapat disetel per-deployment tanpa rebuild.
 #
 # Berkas ini dievaluasi untuk SEMUA environment, termasuk test. Karena itu hanya
 # kunci yang environment variable-nya benar-benar diisi yang ditimpa — kalau tidak,
 # nilai dari config/test.exs akan tergilas dan test kehilangan setelannya.
+# Jadwal penyapuan hasil validasi, dalam notasi cron UTC.
+if cron = System.get_env("VALIDATION_CLEANUP_CRON") do
+  config :maps_scraper, Oban,
+    plugins: [
+      {Oban.Plugins.Lifeline, rescue_after: {5, :minutes}},
+      {Oban.Plugins.Pruner, max_age: {1, :day}},
+      {Oban.Plugins.Cron, crontab: [{cron, MapsScraper.Validation.Cleaner}]}
+    ]
+end
+
+# Berapa baris dikerjakan bersamaan kini ditentukan ukuran antrean Oban.
+if concurrency = env_int.("VALIDATION_CONCURRENCY") do
+  config :maps_scraper, Oban, queues: [validation: concurrency]
+end
+
+# Berkas SQLite. Di dalam Docker ini harus menunjuk volume, kalau tidak antrean
+# ikut hilang bersama container — dan durabilitasnya jadi semu.
+if database = System.get_env("DATABASE_PATH") do
+  config :maps_scraper, MapsScraper.Repo, database: database
+end
+
 validation_overrides =
   [
-    concurrency: env_int.("VALIDATION_CONCURRENCY"),
     max_attempts: env_int.("VALIDATION_MAX_ATTEMPTS"),
     backoff_ms: env_int.("VALIDATION_BACKOFF_MS"),
     max_backoff_ms: env_int.("VALIDATION_MAX_BACKOFF_MS"),
