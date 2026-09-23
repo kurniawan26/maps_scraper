@@ -548,6 +548,73 @@ docker run --rm -p 4000:4000 \
   Samakan dengan versi pengembangan; cek dengan `elixir --version`.
 - Release dijalankan sebagai user `nobody`, bukan root.
 
+### Menjalankan dengan n8n
+
+n8n tersedia di `docker-compose.yml` sebagai profil tersendiri, dan berada di
+jaringan yang sama dengan service lain — jadi dari alur kerja n8n, API ini
+dipanggil cukup dengan nama service:
+
+```
+http://app:4000/api/places
+http://app:4000/api/validations
+```
+
+Tidak perlu IP, tidak perlu `network_mode`, tidak perlu `links`. Semua service
+dalam satu berkas compose otomatis berbagi jaringan `default`, dan DNS internal
+Docker menjawab nama service maupun `container_name`.
+
+Cara menjalankannya bergantung di mana Phoenix hidup:
+
+```bash
+# Phoenix ikut sebagai container -> n8n memanggil http://app:4000
+docker compose --profile app --profile n8n up -d
+
+# Phoenix dijalankan di host dengan `mix phx.server`
+# -> n8n memanggil http://host.docker.internal:4000
+docker compose --profile n8n up -d
+```
+
+Skenario kedua tetap bekerja di Linux karena compose sudah memetakan
+`host.docker.internal` ke gateway host; tanpa itu nama tersebut hanya ada di
+Docker Desktop.
+
+> **Jangan arahkan n8n ke `http://scraper:3000`.** Itu sidecar internal — tanpa
+> antrean, tanpa validasi parameter, tanpa vonis, dan tanpa retry. Pintu masuknya
+> `app`. Di `docker-compose.prod.yml` porta sidecar bahkan tidak dipublikasikan
+> sama sekali.
+
+#### Catatan: `force_ssl` dan pemanggil internal
+
+`config/prod.exs` menyalakan `force_ssl`, dan pengecualiannya semula hanya
+`localhost` dan `127.0.0.1`. Akibatnya permintaan ke `http://app:4000` dari dalam
+jaringan Docker dijawab **301 ke `https://PHX_HOST`** — dan gagal di sana, karena
+tidak ada TLS di jaringan internal. Nama service internal kini ikut dikecualikan:
+
+```elixir
+exclude: [hosts: ["localhost", "127.0.0.1", "app", "maps_scraper_app"]]
+```
+
+Terukur dari dalam container n8n sesudahnya:
+
+| `Host:` | Hasil |
+| ------- | ----- |
+| `app:4000`, `maps_scraper_app:4000`, `localhost` | `200` |
+| `api.contoh.test` (host publik) | `301` — pengalihan HTTPS tetap berlaku |
+
+Jadi lalu lintas publik tetap dipaksa HTTPS; hanya pemanggil internal yang
+dilewatkan. Kalau Anda mengganti nama service di compose, atau menambah pemanggil
+internal lain, perbarui daftar itu — kalau tidak gejalanya persis seperti di atas:
+`301` ke host yang tidak melayani apa pun.
+
+Antarmuka n8n ada di `http://localhost:5678`. Alur kerja, kredensial, dan riwayat
+eksekusinya disimpan di volume bernama `n8n_data`, jadi selamat dari
+`docker compose down` — hanya `down -v` yang menghapusnya.
+
+Untuk memanggil endpoint massal dari n8n, ingat pola dua langkahnya: node HTTP
+Request pertama `POST /api/validations` (membalas `202` + `job_id`), lalu node
+kedua `GET /api/validations/{{ $json.job_id }}` yang diulang — biasanya dengan
+node **Wait** di antaranya — sampai `status` menjadi `done`.
+
 ### Produksi
 
 `docker-compose.yml` ditujukan untuk development — ia **membangun** image dari

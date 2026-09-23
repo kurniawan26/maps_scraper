@@ -57,3 +57,57 @@ services:
       VALIDATION_REVIEW_THRESHOLD: "${VALIDATION_REVIEW_THRESHOLD:-0.3}"
       VALIDATION_AMBIGUITY_MARGIN: "${VALIDATION_AMBIGUITY_MARGIN:-0.1}"
     init: true
+
+  # n8n — pemicu alur kerja yang memanggil API ini lewat HTTP.
+  #
+  # Berada di compose yang sama, jadi otomatis ikut jaringan `default` bersama
+  # scraper dan app; tidak perlu konfigurasi network tambahan. Dari dalam n8n,
+  # alamatnya cukup nama service:
+  #
+  #     http://app:4000/api/places
+  #     http://app:4000/api/validations
+  #
+  # Jangan panggil `http://scraper:3000` langsung — itu sidecar internal tanpa
+  # antrean, tanpa validasi parameter, dan tanpa vonis. Pintu masuknya `app`.
+  #
+  # Dua cara menjalankan, sesuai di mana Phoenix-nya hidup:
+  #
+  #   docker compose --profile app --profile n8n up -d
+  #       Phoenix ikut di Docker -> pakai http://app:4000
+  #
+  #   docker compose --profile n8n up -d
+  #       Phoenix dijalankan di host dengan `mix phx.server` -> pakai
+  #       http://host.docker.internal:4000 (extra_hosts di bawah menyediakannya
+  #       juga di Linux, yang tidak memilikinya secara bawaan)
+  n8n:
+    profiles: ["n8n"]
+    image: ${N8N_IMAGE:-docker.n8n.io/n8nio/n8n:latest}
+    container_name: maps_scraper_n8n
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      TZ: "${TZ:-Asia/Jakarta}"
+      GENERIC_TIMEZONE: "${TZ:-Asia/Jakarta}"
+      N8N_PORT: "5678"
+      N8N_HOST: "${N8N_HOST:-localhost}"
+      # Kunci enkripsi kredensial. Dibiarkan kosong, n8n membuat sendiri dan
+      # menyimpannya di volume — hilang bersama volume kalau volume dihapus.
+      # Isi eksplisit kalau kredensialnya perlu selamat dari `down -v`.
+      N8N_ENCRYPTION_KEY: "${N8N_ENCRYPTION_KEY:-}"
+      # Dev diakses lewat http biasa, bukan https. Tanpa ini n8n menolak
+      # mengirim cookie sesi saat host-nya bukan localhost. Jangan dibawa ke
+      # produksi — di sana taruh n8n di belakang TLS dan hapus baris ini.
+      N8N_SECURE_COOKIE: "${N8N_SECURE_COOKIE:-false}"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    # Supaya `host.docker.internal` juga bekerja di Linux, untuk kasus Phoenix
+    # dijalankan di host alih-alih sebagai container.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    init: true
+
+volumes:
+  # Alur kerja, kredensial, dan riwayat eksekusi n8n. Dinamai supaya selamat dari
+  # `docker compose down` — hanya `down -v` yang menghapusnya.
+  n8n_data:
