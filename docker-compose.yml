@@ -42,6 +42,7 @@ services:
     environment:
       SCRAPER_URL: "http://scraper:3000"
       SCRAPER_TIMEOUT_MS: "${SCRAPER_TIMEOUT_MS:-45000}"
+      INSTAGRAM_TIMEOUT_MS: "${INSTAGRAM_TIMEOUT_MS:-45000}"
       SECRET_KEY_BASE: "${SECRET_KEY_BASE:?SECRET_KEY_BASE belum diisi - jalankan: mix phx.gen.secret}"
       PHX_HOST: "${PHX_HOST:-localhost}"
       TZ: "${TZ:-Asia/Jakarta}"

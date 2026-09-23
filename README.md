@@ -1,22 +1,30 @@
 # MapsScraper
 
-JSON API untuk memverifikasi keberadaan sebuah tempat di Google Maps.
+JSON API untuk memverifikasi keberadaan sebuah data — tempat di Google Maps,
+akun di Instagram — dari input yang bervariasi.
 
 Aplikasi ini **hanya menyajikan JSON API**: tanpa frontend, database, email,
 maupun terjemahan. Dependensi untuk semua itu — esbuild, Tailwind, LiveView,
 Ecto/Postgres, Swoosh, Gettext — sengaja tidak dipasang, sehingga `mix setup`
 cukup mengunduh dependensi Elixir saja dan tidak menyiapkan database apa pun.
 
-## Maps Scraper API
+## API
 
-API untuk **memastikan apakah sebuah tempat benar-benar ada di Google Maps**, dari
-input yang bervariasi: nama tempat, alamat/lokasi, koordinat, atau URL Google Maps.
-Scraping dikerjakan sidecar Playwright di Docker; Phoenix menyajikannya sebagai
-HTTP API ber-response JSON.
+Dua sumber, satu pola yang sama: Phoenix memvalidasi masukan, sidecar Playwright
+membuka halamannya, dan jawabannya selalu berbentuk `found` + `best_match`.
 
 ```
-klien  ->  Phoenix /api/places  ->  sidecar :3000 (Playwright)  ->  Google Maps
+klien  ->  Phoenix /api/places     ->  sidecar :3000 (Playwright)  ->  Google Maps
+klien  ->  Phoenix /api/instagram  ->  sidecar :3000 (Playwright)  ->  Instagram
 ```
+
+| Sumber | Endpoint | Pertanyaan yang dijawab |
+| ------ | -------- | ----------------------- |
+| Google Maps | `/api/places` | Apakah tempat ini benar-benar ada? |
+| Instagram | `/api/instagram` | Apakah akun ini ada, dan apakah milik usaha yang dimaksud? |
+
+Keduanya bisa dikirim sebagai batch lewat `/api/validations` — lihat
+[Validasi massal](#validasi-massal-antrean-job).
 
 ### Menjalankan
 
@@ -40,13 +48,16 @@ Seluruh variabel beserta penjelasannya ada di `.env.example`.
 
 | Method | Path | Keterangan |
 | ------ | ---- | ---------- |
-| `GET`  | `/api/places?query=...` | Verifikasi lewat query string |
-| `POST` | `/api/places` | Verifikasi lewat body JSON |
+| `GET`  | `/api/places?query=...` | Verifikasi tempat lewat query string |
+| `POST` | `/api/places` | Verifikasi tempat lewat body JSON |
+| `GET`  | `/api/instagram?query=...` | Verifikasi akun Instagram lewat query string |
+| `POST` | `/api/instagram` | Verifikasi akun Instagram lewat body JSON |
+| `POST` | `/api/validations` | Batch, untuk kedua sumber |
 | `GET`  | `/api/health` | Status Phoenix + sidecar |
 
 Koleksi Postman siap pakai ada di `postman/` — lihat [Postman](#postman) di bawah.
 
-### Parameter
+### Parameter `/api/places`
 
 | Nama | Tipe | Default | Keterangan |
 | ---- | ---- | ------- | ---------- |
@@ -56,7 +67,7 @@ Koleksi Postman siap pakai ada di `postman/` — lihat [Postman](#postman) di ba
 | `lang` | string | `id` | Bahasa hasil |
 | `country` | string | `ID` | Region hasil |
 
-### Membaca hasilnya
+### Membaca hasil `/api/places`
 
 Dua kolom yang menentukan jawaban "valid atau tidak":
 
@@ -79,7 +90,7 @@ gunanya `best_match`:
 Ambang yang aman untuk dipakai sebagai keputusan otomatis: anggap valid bila
 `found == true` **dan** (`best_match == null` atau `best_match >= 0.5`).
 
-### Contoh
+### Contoh `/api/places`
 
 ```bash
 # nama tempat
@@ -102,7 +113,7 @@ curl -X POST http://localhost:4000/api/places \
   -d '{"query": "warung sate jakarta", "limit": 3, "detail": true}'
 ```
 
-### Bentuk response
+### Bentuk response `/api/places`
 
 ```json
 {
@@ -157,6 +168,119 @@ kolom yang butuh membuka halaman yang kosong.
 berbayar (`sponsored: true`) memang tidak memuatnya, dan Google merendernya menyusul.
 Jangan pakai keduanya sebagai dasar keputusan.
 
+### Instagram `/api/instagram`
+
+Memastikan apakah sebuah akun Instagram ada, dari username maupun URL profil.
+**Tidak perlu login, cookie sesi, maupun akun apa pun.** Halaman profil publik
+memang menampilkan modal ajakan mendaftar, tetapi itu hanya lapisan di atas
+kontennya — data profilnya tetap ada di DOM.
+
+Yang tidak bisa dilakukan tanpa browser: `curl` ke `instagram.com/<username>/`
+mengembalikan `200` dengan shell JavaScript yang **sama persis** untuk akun yang
+ada maupun yang tidak. Profilnya dirender klien, jadi status HTTP dan HTML mentah
+tidak membedakan apa pun. Karena itu jalurnya tetap lewat sidecar Playwright.
+
+| Nama | Tipe | Default | Keterangan |
+| ---- | ---- | ------- | ---------- |
+| `query` | string | *wajib* | Username (`kournicloud`, `@kournicloud`) atau URL profil |
+| `name` | string | — | Nama yang diharapkan, mis. nama usaha. Mengubah arti `best_match` (lihat di bawah) |
+| `lang` | string | `en` | Bahasa halaman |
+| `country` | string | `US` | Region halaman |
+
+`lang`/`country` defaultnya `en`/`US`, bukan `id`/`ID` seperti `/api/places`.
+Seluruh penanda yang dibaca sidecar — `Followers`, `Profile isn't available`,
+lencana `Verified` — ikut berubah mengikuti bahasa halaman, jadi bahasanya
+dikunci supaya parsingnya pasti. Bahasa bio tidak terpengaruh; itu isi pengguna.
+
+```bash
+# username
+curl "http://localhost:4000/api/instagram?query=kournicloud"
+
+# URL profil
+curl "http://localhost:4000/api/instagram?query=https://www.instagram.com/natgeo/"
+
+# apakah handle ini milik usaha bernama X?
+curl -X POST http://localhost:4000/api/instagram \
+  -H "content-type: application/json" \
+  -d '{"query": "kournicloud", "name": "Warung Sate Pak Budi"}'
+```
+
+```json
+{
+  "type": "profile",
+  "input_type": "username",
+  "query": "kournicloud",
+  "found": true,
+  "best_match": 1,
+  "count": 1,
+  "results": [
+    {
+      "username": "kournicloud",
+      "full_name": "Kurniawan",
+      "bio": null,
+      "external_url": "kurniawan-social.netlify.app",
+      "verified": false,
+      "private": false,
+      "followers": 710,
+      "following": 513,
+      "posts": 5,
+      "profile_url": "https://www.instagram.com/kournicloud/",
+      "match": 1
+    }
+  ]
+}
+```
+
+#### Arti `best_match` di sini
+
+Berbeda dari Maps, Instagram tidak punya pencarian — satu query menunjuk tepat
+satu akun. Jadi yang diukur bergantung pada ada tidaknya `name`:
+
+| `name` | Yang diukur | `best_match` |
+| ------ | ----------- | ------------ |
+| tidak diisi | Apakah handle yang dibuka sama dengan yang diminta | `1` sama persis, `0` kalau Instagram mengalihkan ke akun lain |
+| diisi | Seberapa cocok nama itu dengan `full_name` + username + bio | `0`–`1`, memakai skor yang sama dengan `/api/places` |
+
+Isi `name` kalau yang ingin dijawab adalah "apakah handle ini benar milik usaha
+X". Tanpa itu, `found: true` hanya berarti handle-nya ada — bukan milik siapa.
+
+#### Tiga keadaan, bukan dua
+
+Ini pembedaan yang paling menentukan, dan paling mudah terlewat:
+
+| Keadaan | Yang terlihat | Jawaban API |
+| ------- | ------------- | ----------- |
+| Akun ada | `og:title` ada di halaman | `200`, `found: true` |
+| Akun tidak ada | Halaman "Profile isn't available" | `200`, `found: false` |
+| **Tidak terbaca** | Tidak keduanya — Instagram menolak melayani | `503`, `instagram_blocked` |
+
+Keadaan ketiga **tidak boleh** diperlakukan sebagai "tidak ada". Kalau
+dilaporkan `found: false`, akun yang sebenarnya ada akan terhapus dari data Anda
+hanya karena Instagram sedang rewel. Karena itu jawabannya `5xx`, yang membuat
+`MapsScraper.Validation.Queue` mengulangnya alih-alih memvonis barisnya.
+
+#### Yang tidak bisa dibedakan
+
+Akun yang **tidak pernah ada**, yang **dihapus**, dan yang **dinonaktifkan**
+menampilkan halaman yang sama persis. Ketiganya dijawab `found: false`. Kalau
+Anda perlu membedakannya, sinyal ini tidak cukup.
+
+Kolom `followers`, `following`, `posts`, `bio`, dan `external_url` bersifat
+sekunder dan best-effort — Instagram merendernya menyusul, dan `external_url`
+tidak selalu ada dalam bentuk yang bisa dibaca. Untuk keputusan validasi, pakai
+`found` dan `best_match`.
+
+#### Batasnya
+
+Pengujian 10 akun berurutan dari IP residensial: 10/10 berhasil, ~1 detik per
+akun, nol blokir. **Itu belum diuji dari IP datacenter**, dan Instagram jauh
+lebih ketat di sana. Kalau `instagram_blocked` mulai sering muncul setelah
+dideploy, yang pertama diturunkan adalah `VALIDATION_CONCURRENCY`; kalau tetap,
+yang dibutuhkan adalah proxy residensial di depan sidecar — bukan perubahan kode.
+
+Penyedia data dapat ditukar tanpa menyentuh context, antrean, maupun controller;
+lihat `MapsScraper.Instagram.Provider`.
+
 ### Error
 
 ```json
@@ -168,9 +292,13 @@ Jangan pakai keduanya sebagai dasar keputusan.
 | `422` | `invalid_params` | Parameter tidak valid |
 | `503` | `scraper_unavailable` | Sidecar belum jalan (`docker compose up`) |
 | `503` | `busy` | Sidecar sedang penuh; ulangi sesuai header `Retry-After` |
+| `503` | `instagram_blocked` | Instagram menolak melayani; ulangi nanti |
+| `503` | `instagram_unreadable` | Profil tidak terbaca dalam batas waktu; ulangi nanti |
 | `504` | `timeout` | Scraping melewati batas waktu |
 
-Tempat yang tidak ditemukan **bukan** error: statusnya tetap `200` dengan
+Tempat atau akun yang tidak ditemukan **bukan** error: statusnya tetap `200`
+dengan `found: false`. Sebaliknya, dua kode `instagram_*` di atas berarti
+*tidak tahu*, bukan *tidak ada* — jangan pernah menerjemahkannya jadi
 `found: false`.
 
 ### Daur hidup browser
@@ -333,13 +461,42 @@ curl http://localhost:4000/api/validations/iq-9VDY7UabOrjHJ
 
 # ringkasan antrean
 curl http://localhost:4000/api/validations
+
+# batch Instagram
+curl -X POST http://localhost:4000/api/validations \
+  -H "content-type: application/json" \
+  -d '{"source": "instagram", "queries": ["kournicloud", "natgeo"], "name": "Kurniawan"}'
 ```
 
 | Method | Path | Keterangan |
 | ------ | ---- | ---------- |
-| `POST` | `/api/validations` | Kirim batch. Body: `queries` (daftar teks) + opsi `limit`/`detail`/`lang`/`country` yang berlaku untuk seluruh baris |
+| `POST` | `/api/validations` | Kirim batch. Body: `source`, `queries` (daftar teks), dan opsi sumbernya — berlaku untuk seluruh baris |
 | `GET`  | `/api/validations/:id` | Status dan hasil job |
 | `GET`  | `/api/validations` | Ringkasan antrean |
+
+#### Sumber
+
+| `source` | Isi `queries` | Opsi yang berlaku |
+| -------- | ------------- | ----------------- |
+| `maps` (default) | Nama tempat, alamat, koordinat, URL Maps | `limit`, `detail`, `lang`, `country` |
+| `instagram` | Username atau URL profil | `name`, `lang`, `country` |
+
+Satu batch memeriksa satu sumber. Mencampurnya sengaja tidak didukung: opsi tiap
+sumber berbeda, dan yang memanggil endpoint ini biasanya sedang memeriksa satu
+kolom dari satu tabel.
+
+Untuk `instagram`, baris yang bukan username maupun URL profil ditolak di depan
+dengan `422` — bukan diterima lalu gagal satu per satu. Baris seperti itu tidak
+akan pernah berhasil betapa pun sering diulang, jadi memberi tahu sekarang lebih
+jujur daripada membuat klien menunggu hasil polling yang sudah pasti sia-sia.
+
+Opsi `name` berlaku untuk **seluruh batch**. Kalau tiap baris punya nama
+pembanding sendiri, kirim satu batch per nama — atau pakai `/api/instagram`
+per baris.
+
+Bentuk kandidatnya mengikuti sumbernya. Untuk `maps` berisi `place_id`/`cid`/
+`ftid` dan koordinat; untuk `instagram` berisi `username`, `full_name`,
+`profile_url`, `followers`, `verified`, dan `private`.
 
 Hasil tiap baris dipadatkan ke jawaban validasinya — `found`, `best_match`,
 `verdict`, dan beberapa **kandidat** terurut dari yang paling cocok. Untuk daftar

@@ -76,6 +76,7 @@ services:
       # Nama service dipakai sebagai host; keduanya di jaringan yang sama.
       SCRAPER_URL: "http://scraper:3000"
       SCRAPER_TIMEOUT_MS: "${SCRAPER_TIMEOUT_MS:-45000}"
+      INSTAGRAM_TIMEOUT_MS: "${INSTAGRAM_TIMEOUT_MS:-45000}"
       TZ: "${TZ:-Asia/Jakarta}"
 
       SECRET_KEY_BASE: "${SECRET_KEY_BASE:?SECRET_KEY_BASE belum diisi - jalankan: mix phx.gen.secret}"
