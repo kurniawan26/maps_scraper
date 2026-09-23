@@ -1,7 +1,7 @@
 defmodule MapsScraperWeb.PlaceControllerTest do
   use MapsScraperWeb.ConnCase, async: true
 
-  alias MapsScraper.Maps.Client
+  alias MapsScraper.Scraper.Client
 
   @place %{
     "name" => "Monumen Nasional",

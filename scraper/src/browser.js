@@ -181,6 +181,28 @@ export function browserStats() {
   };
 }
 
+// Halaman yang dirender bertahap belum tentu selesai saat selektor pertamanya
+// muncul: Google mengisi panel tempat sepotong-sepotong, Instagram merender
+// <head> lebih dulu daripada header profil. Menunggu satu selektor karena itu
+// tidak cukup. Halaman dibaca berulang sampai dua pembacaan berturut-turut
+// identik — barulah isinya dianggap final.
+export async function extractWhenStable(page, extractor, { rounds = 6, interval = 400 } = {}) {
+  let previous = null;
+  let latest = null;
+
+  for (let round = 0; round < rounds; round += 1) {
+    latest = await page.evaluate(extractor);
+    const serialized = JSON.stringify(latest);
+
+    if (serialized === previous) return latest;
+
+    previous = serialized;
+    await page.waitForTimeout(interval);
+  }
+
+  return latest;
+}
+
 export async function withPage(options, callback) {
   const { lang = 'id', country = 'ID', timeout = 45000, blockAssets = true } = options;
   const browser = await acquireBrowser();

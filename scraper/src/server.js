@@ -1,7 +1,8 @@
 import http from 'node:http';
 import { browserMode, browserStats, closeBrowser } from './browser.js';
-import { ScrapeError, scrapePlace, scrapeSearch } from './maps.js';
-import { clampInt, isMapsUrl } from './util.js';
+import { scrapeProfile } from './instagram.js';
+import { scrapePlace, scrapeSearch } from './maps.js';
+import { ScrapeError, clampInt, instagramUsername, isMapsUrl } from './util.js';
 
 function toInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -59,17 +60,35 @@ function readBody(req) {
   });
 }
 
+function buildTimeout(payload) {
+  return clampInt(payload.timeout, { min: 5000, max: 120000, fallback: 45000 });
+}
+
 function buildOptions(payload) {
   return {
     lang: typeof payload.lang === 'string' ? payload.lang : 'id',
     country: typeof payload.country === 'string' ? payload.country : 'ID',
     limit: payload.limit,
     detail: payload.detail === true,
-    timeout: clampInt(payload.timeout, { min: 5000, max: 120000, fallback: 45000 })
+    timeout: buildTimeout(payload)
   };
 }
 
-async function handleScrape(req, res) {
+// Instagram defaultnya en/US, bukan id/ID seperti Maps: seluruh penanda yang
+// dibaca instagram.js — "Followers", "Profile isn't available", label "Verified"
+// — ikut berubah mengikuti bahasa. Mengunci bahasanya membuat parsing pasti.
+function buildInstagramOptions(payload) {
+  return {
+    lang: typeof payload.lang === 'string' ? payload.lang : 'en',
+    country: typeof payload.country === 'string' ? payload.country : 'US',
+    name: typeof payload.name === 'string' && payload.name.trim() ? payload.name.trim() : null,
+    timeout: buildTimeout(payload)
+  };
+}
+
+// Satu permintaan memakai minimal satu context browser. Slot dihitung di satu
+// tempat supaya tiap endpoint baru ikut terbatasi tanpa menyalin penjagaannya.
+async function withSlot(handler) {
   if (MAX_CONCURRENT_SCRAPES > 0 && inFlight >= MAX_CONCURRENT_SCRAPES) {
     throw new ScrapeError(`Sidecar sedang menangani ${inFlight} permintaan`, {
       status: 503,
@@ -77,6 +96,15 @@ async function handleScrape(req, res) {
     });
   }
 
+  inFlight += 1;
+  try {
+    return await handler();
+  } finally {
+    inFlight -= 1;
+  }
+}
+
+async function readQuery(req) {
   const payload = await readBody(req);
   const query = typeof payload.query === 'string' ? payload.query.trim() : '';
 
@@ -84,18 +112,35 @@ async function handleScrape(req, res) {
     throw new ScrapeError('Field "query" wajib diisi', { status: 422, code: 'missing_query' });
   }
 
+  return { payload, query };
+}
+
+async function handleScrape(req, res) {
+  const { payload, query } = await readQuery(req);
   const options = buildOptions(payload);
 
-  inFlight += 1;
-  try {
-    const result = isMapsUrl(query)
-      ? await scrapePlace(query, options)
-      : await scrapeSearch(query, options);
+  const result = await withSlot(() =>
+    isMapsUrl(query) ? scrapePlace(query, options) : scrapeSearch(query, options)
+  );
 
-    sendJson(res, 200, result);
-  } finally {
-    inFlight -= 1;
+  sendJson(res, 200, result);
+}
+
+async function handleInstagram(req, res) {
+  const { payload, query } = await readQuery(req);
+  const username = instagramUsername(query);
+
+  if (!username) {
+    throw new ScrapeError('Query bukan username maupun URL profil Instagram', {
+      status: 422,
+      code: 'invalid_username'
+    });
   }
+
+  const options = { ...buildInstagramOptions(payload), query };
+  const result = await withSlot(() => scrapeProfile(username, options));
+
+  sendJson(res, 200, result);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -113,6 +158,10 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/scrape') {
       return await handleScrape(req, res);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/scrape/instagram') {
+      return await handleInstagram(req, res);
     }
 
     return sendJson(res, 404, { error: { code: 'not_found', message: 'Endpoint tidak dikenal' } });

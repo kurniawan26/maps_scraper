@@ -1,5 +1,16 @@
 // Helper murni (tanpa browser) yang dipakai lintas modul.
 
+// Error yang sudah membawa status HTTP dan kode mesinnya sendiri. Ditaruh di sini,
+// bukan di salah satu modul scraper, karena dipakai maps.js maupun instagram.js
+// dan server.js yang menerjemahkannya jadi response.
+export class ScrapeError extends Error {
+  constructor(message, { status = 502, code = 'scrape_failed' } = {}) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
 const SHORT_LINK_HOSTS = ['maps.app.goo.gl', 'goo.gl', 'g.co'];
 const GOOGLE_HOST = /^(?:[a-z0-9-]+\.)*google\.(?:com|[a-z]{2})(?:\.[a-z]{2})?$/i;
 
@@ -196,4 +207,67 @@ export function matchScore(query, place) {
   ).length;
 
   return Math.round((hits / queryTokens.length) * 100) / 100;
+}
+
+// --- Instagram -------------------------------------------------------------
+
+const INSTAGRAM_HOSTS = ['instagram.com', 'instagr.am', 'ig.me'];
+const INSTAGRAM_USERNAME = /^[a-z0-9._]{1,30}$/i;
+
+// Segmen pertama URL Instagram yang bukan username. Tanpa daftar ini,
+// "/p/ABC123/" akan dibaca sebagai profil bernama "p".
+const INSTAGRAM_RESERVED = new Set([
+  'p', 'reel', 'reels', 'stories', 'explore', 'accounts', 'direct', 'tv', 's',
+  'about', 'developer', 'legal', 'privacy', 'terms', 'api', 'challenge', 'oauth'
+]);
+
+// Menerima "kournicloud", "@kournicloud", atau URL profil dalam berbagai bentuk,
+// dan mengembalikan username huruf kecil — atau null kalau bukan salah satunya.
+export function instagramUsername(value) {
+  if (typeof value !== 'string') return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    let url;
+    try {
+      url = new URL(trimmed);
+    } catch {
+      return null;
+    }
+
+    const host = url.hostname.replace(/^www\./, '').toLowerCase();
+    if (!INSTAGRAM_HOSTS.includes(host)) return null;
+
+    const [first] = url.pathname.split('/').filter(Boolean);
+    if (!first || INSTAGRAM_RESERVED.has(first.toLowerCase())) return null;
+
+    return INSTAGRAM_USERNAME.test(first) ? first.toLowerCase() : null;
+  }
+
+  const bare = trimmed.replace(/^@/, '');
+  return INSTAGRAM_USERNAME.test(bare) ? bare.toLowerCase() : null;
+}
+
+// Angka sosial datang dalam dua bentuk: lengkap dengan pemisah ribuan
+// ("268.554.117", dari atribut title) atau sudah dibulatkan dengan akhiran
+// ("269M", "32K", dari og:description). toCount/1 hanya menangani bentuk pertama
+// dan akan membaca "269M" sebagai 269.
+const COUNT_SUFFIX = { k: 1e3, rb: 1e3, m: 1e6, jt: 1e6, b: 1e9, t: 1e12 };
+
+export function toSocialCount(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+
+  const match = value.trim().match(/(\d[\d.,\s]*)\s*(k|rb|m|jt|b|t)?\b/i);
+  if (!match) return null;
+
+  const suffix = match[2] ? COUNT_SUFFIX[match[2].toLowerCase()] : null;
+
+  if (!suffix) return toCount(match[1]);
+
+  // Dengan akhiran, pemisahnya adalah desimal ("1.5M"), bukan ribuan.
+  const base = Number(match[1].replace(/\s/g, '').replace(',', '.'));
+  return Number.isFinite(base) ? Math.round(base * suffix) : null;
 }

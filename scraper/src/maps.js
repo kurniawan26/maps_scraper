@@ -1,6 +1,7 @@
-import { withPage } from './browser.js';
+import { extractWhenStable, withPage } from './browser.js';
 import { extractList, extractEndOfList, extractPlace } from './extract.js';
 import {
+  ScrapeError,
   clampInt,
   coordsFromUrl,
   idsFromUrl,
@@ -27,35 +28,6 @@ const DETAIL_BUDGET_MS = Number(process.env.DETAIL_BUDGET_MS || 60_000);
 
 // Di bawah ini membuka halaman baru hanya akan berujung timeout.
 const DETAIL_MIN_SLICE_MS = 2_000;
-
-// Google mengisi panel secara bertahap: judul lebih dulu, lalu rating, lalu daftar
-// info. Menunggu satu selektor saja tidak cukup karena selektor yang ditunggu bisa
-// muncul sebelum kolom lain terisi. Karena itu halaman dibaca berulang sampai dua
-// pembacaan berturut-turut identik — barulah isinya dianggap final.
-async function extractWhenStable(page, extractor, { rounds = 6, interval = 400 } = {}) {
-  let previous = null;
-  let latest = null;
-
-  for (let round = 0; round < rounds; round += 1) {
-    latest = await page.evaluate(extractor);
-    const serialized = JSON.stringify(latest);
-
-    if (serialized === previous) return latest;
-
-    previous = serialized;
-    await page.waitForTimeout(interval);
-  }
-
-  return latest;
-}
-
-export class ScrapeError extends Error {
-  constructor(message, { status = 502, code = 'scrape_failed' } = {}) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
 
 function normalizeListItem(item) {
   const url = item.url;

@@ -159,3 +159,78 @@ export function extractPlace() {
       null
   };
 }
+
+// Instagram merender profil dari JavaScript, jadi HTML mentahnya sama persis untuk
+// username yang ada maupun yang tidak — yang membedakan hanya isi DOM setelah
+// skrip jalan. Tiga keadaan yang mungkin, dan harus dibedakan dengan tegas:
+//
+//   og:title ada                    -> profil ada
+//   teks "Profile isn't available"  -> profil tidak ada
+//   dua-duanya tidak ada            -> Instagram menolak melayani kita
+//
+// Keadaan ketiga TIDAK BOLEH dibaca sebagai "tidak ada". Lihat instagram.js.
+export function extractProfile() {
+  const clean = (value) => {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.replace(/\s+/g, ' ').trim();
+    return trimmed || null;
+  };
+
+  const meta = (selector, attribute = 'content') => {
+    const node = document.querySelector(selector);
+    return node ? clean(node.getAttribute(attribute)) : null;
+  };
+
+  const body = document.body ? document.body.innerText : '';
+  const header = document.querySelector('header');
+
+  // Jumlah pengikut yang eksak hanya ada di atribut title; teks di sebelahnya
+  // sudah dibulatkan Instagram ("268M followers"). Butir berikutnya — following
+  // dan postingan — tidak punya atribut itu.
+  const items = header ? Array.from(header.querySelectorAll('ul li')) : [];
+
+  const titleOf = (node) => {
+    if (!node) return null;
+    const holder = node.querySelector('[title]');
+    return holder ? clean(holder.getAttribute('title')) : null;
+  };
+
+  // Tautan bio biasanya dibungkus Instagram lewat l.instagram.com, tapi tidak
+  // selalu. Cadangannya: tautan keluar pertama di header yang bukan milik Meta —
+  // penjagaan itu yang memisahkannya dari tautan Threads di sebelahnya.
+  const externalLink = (root) => {
+    if (!root) return null;
+    const wrapped = root.querySelector('a[href*="l.instagram.com"]');
+    if (wrapped) return wrapped;
+
+    return (
+      Array.from(root.querySelectorAll('a[href^="http"]')).find(
+        (node) =>
+          !/(^|\.)(instagram\.com|threads\.net|threads\.com|facebook\.com|meta\.com)$/i.test(
+            node.hostname || ''
+          )
+      ) || null
+    );
+  };
+
+  const bioLink = externalLink(header);
+
+  return {
+    og_title: meta('meta[property="og:title"]'),
+    og_description: meta('meta[property="og:description"]'),
+    // og:url sudah berupa hasil akhir: kalau Instagram mengalihkan ke akun lain,
+    // yang tertulis di sini adalah akun tujuan, bukan yang kita minta.
+    og_url: meta('meta[property="og:url"]') || meta('link[rel="canonical"]', 'href'),
+    meta_description: meta('meta[name="description"]'),
+    followers_exact: titleOf(items[0]),
+    stats_raw: items.slice(0, 3).map((item) => clean(item.innerText)),
+    verified: Boolean(
+      header && header.querySelector('svg[aria-label="Verified"], svg[aria-label="Terverifikasi"]')
+    ),
+    private: /This account is private|Akun ini privat/i.test(body),
+    missing: /Profile isn't available|this page isn't available|Profile tidak tersedia|Halaman ini tidak tersedia/i.test(
+      `${document.title} ${body.slice(0, 500)}`
+    ),
+    external_url: bioLink ? clean(bioLink.innerText) : null
+  };
+}

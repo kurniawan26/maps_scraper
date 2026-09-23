@@ -16,6 +16,15 @@ defmodule MapsScraper.ValidationStub do
     * `"timeout"`          — gagal sementara terus-menerus
     * `"flaky:<n>:<nama>"` — gagal sementara `n` kali, lalu berhasil
     * `"crash"`            — task-nya mati
+
+  Dengan `"source" => "instagram"` pemisahnya titik, bukan titik dua, karena
+  `MapsScraper.Validation` menolak baris yang bukan username Instagram yang sah
+  sebelum stub ini sempat dipanggil:
+
+    * `"ok.<username>"`       — akun ditemukan
+    * `"notfound.<username>"` — akun tidak ada
+    * `"blocked"`             — Instagram menolak melayani; kegagalan sementara
+      yang harus diulang, bukan "akun tidak ada"
   """
 
   @table :validation_stub_attempts
@@ -27,7 +36,55 @@ defmodule MapsScraper.ValidationStub do
     :ok
   end
 
-  def lookup(%{"query" => query} = _params) do
+  def lookup(%{"query" => query} = params) do
+    if params["source"] == "instagram", do: instagram(query), else: maps(query)
+  end
+
+  # Bentuk payload Instagram berbeda dari Maps — kandidatnya akun, bukan tempat.
+  # Query kontrol seperti "timeout" dan "crash" diteruskan ke jalur Maps supaya
+  # tidak perlu ditulis dua kali.
+  defp instagram("ok." <> username) do
+    {:ok, profile_payload(username, found: true, best_match: 1)}
+  end
+
+  defp instagram("notfound." <> username) do
+    {:ok, profile_payload(username, found: false, best_match: 0)}
+  end
+
+  defp instagram("blocked") do
+    {:error,
+     {:scraper, 503,
+      %{"code" => "instagram_blocked", "message" => "Instagram mengalihkan ke halaman login"}}}
+  end
+
+  defp instagram(other), do: maps(other)
+
+  defp profile_payload(username, opts) do
+    %{
+      "type" => "profile",
+      "input_type" => "username",
+      "found" => opts[:found],
+      "best_match" => opts[:best_match],
+      "count" => if(opts[:found], do: 1, else: 0),
+      "results" => if(opts[:found], do: [profile(username, opts[:best_match])], else: [])
+    }
+  end
+
+  defp profile(username, match) do
+    %{
+      "username" => username,
+      "full_name" => String.capitalize(username),
+      "profile_url" => "https://www.instagram.com/#{username}/",
+      "followers" => 710,
+      "following" => 513,
+      "posts" => 5,
+      "verified" => false,
+      "private" => false,
+      "match" => match
+    }
+  end
+
+  defp maps(query) do
     case query do
       "ok:" <> name -> {:ok, payload(name, found: true, best_match: 1)}
       "notfound:" <> name -> {:ok, payload(name, found: false, best_match: 0)}

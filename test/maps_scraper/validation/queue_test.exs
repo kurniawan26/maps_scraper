@@ -350,6 +350,89 @@ defmodule MapsScraper.Validation.QueueTest do
     end
   end
 
+  describe "sumber data" do
+    test "defaultnya maps kalau tidak disebutkan" do
+      job = enqueue!(["ok:Monas"])
+      assert job.source == "maps"
+      assert Job.to_map(await_done(job.id)).source == "maps"
+    end
+
+    test "batch instagram dikerjakan dan dirangkum sebagai akun" do
+      job = enqueue!(["ok.kournicloud"], %{"source" => "instagram"})
+      assert job.source == "instagram"
+
+      [result] = Job.to_map(await_done(job.id)).results
+
+      assert result.status == :ok
+      assert result.verdict == :match
+      # Kandidat akun tidak membawa place_id/koordinat; identitasnya username.
+      assert [%{username: "kournicloud", profile_url: url, followers: 710}] = result.candidates
+      assert url == "https://www.instagram.com/kournicloud/"
+      refute Map.has_key?(hd(result.candidates), :place_id)
+    end
+
+    test "akun yang tidak ada divonis tidak cocok" do
+      job = enqueue!(["notfound.zzqqfiktif"], %{"source" => "instagram"}) |> Map.fetch!(:id)
+      [result] = Job.to_map(await_done(job)).results
+
+      assert result.status == :ok
+      assert result.found == false
+      assert result.verdict == :no_match
+    end
+
+    test "penolakan Instagram diulang, bukan divonis akun tidak ada" do
+      # Inti pembedaannya: "tidak terbaca" tidak boleh menjadi "tidak ada".
+      # Kalau 503 ini pernah lolos sebagai kegagalan permanen — atau lebih buruk,
+      # sebagai found: false — baris yang akunnya benar-benar ada ikut terhapus.
+      job = enqueue!(["blocked"], %{"source" => "instagram"}) |> Map.fetch!(:id)
+      [result] = Job.to_map(await_done(job)).results
+
+      assert result.status == :error
+      assert result.attempts == 3
+      assert result.error.code == "instagram_blocked"
+      # Tidak ada vonis sama sekali — barisnya belum pernah benar-benar dijawab.
+      assert Job.verdicts(await_done(job)) == %{match: 0, review: 0, no_match: 0}
+    end
+
+    test "sumber yang tidak dikenal ditolak" do
+      assert {:error, {:invalid, "source", _}} =
+               Validation.enqueue(%{"queries" => ["ok:A"], "source" => "tiktok"})
+
+      assert {:error, {:invalid, "source", _}} =
+               Validation.enqueue(%{"queries" => ["ok:A"], "source" => 1})
+    end
+
+    test "baris yang bukan akun Instagram ditolak sebelum batch diterima" do
+      # Baris seperti ini tidak akan pernah berhasil betapa pun sering diulang,
+      # jadi menolaknya di depan lebih jujur daripada 202 lalu gagal satu-satu.
+      assert {:error, {:invalid, "queries", _}} =
+               Validation.enqueue(%{
+                 "queries" => ["ok.kournicloud", "https://www.instagram.com/p/ABC/"],
+                 "source" => "instagram"
+               })
+
+      assert {:error, {:invalid, "queries", _}} =
+               Validation.enqueue(%{"queries" => ["ada spasi"], "source" => "instagram"})
+    end
+
+    test "opsi instagram divalidasi dengan aturannya sendiri" do
+      # `limit` tidak berlaku untuk Instagram dan diabaikan; `name` yang berlaku.
+      assert {:error, {:invalid, "name", _}} =
+               Validation.enqueue(%{
+                 "queries" => ["ok.kournicloud"],
+                 "source" => "instagram",
+                 "name" => 123
+               })
+
+      assert {:ok, _job} =
+               Validation.enqueue(%{
+                 "queries" => ["ok.kournicloud"],
+                 "source" => "instagram",
+                 "name" => "Kurniawan"
+               })
+    end
+  end
+
   describe "stats/0" do
     test "melaporkan konfigurasi antrean" do
       stats = Validation.stats()
