@@ -11,6 +11,9 @@ defmodule MapsScraperWeb.Router do
     get "/places", PlaceController, :index
     post "/places", PlaceController, :index
 
+    get "/instagram", InstagramController, :index
+    post "/instagram", InstagramController, :index
+
     post "/validations", ValidationController, :create
     get "/validations", ValidationController, :index
     get "/validations/:id", ValidationController, :show

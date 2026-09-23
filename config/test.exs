@@ -11,7 +11,7 @@ config :maps_scraper, MapsScraperWeb.Endpoint,
 config :maps_scraper, :scraper,
   base_url: "http://sidecar.test",
   timeout: 5_000,
-  req_options: [plug: {Req.Test, MapsScraper.Maps.Client}]
+  req_options: [plug: {Req.Test, MapsScraper.Scraper.Client}]
 
 # Antrean diuji tanpa sidecar: lookup diarahkan ke stub, dan jeda retry
 # dipendekkan supaya test tidak perlu menunggu lama.

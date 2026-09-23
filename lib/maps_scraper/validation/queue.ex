@@ -79,7 +79,11 @@ defmodule MapsScraper.Validation.Queue do
       match_threshold: opts[:match_threshold] || config[:match_threshold] || 0.8,
       review_threshold: opts[:review_threshold] || config[:review_threshold] || 0.3,
       ambiguity_margin: opts[:ambiguity_margin] || config[:ambiguity_margin] || 0.1,
-      lookup: opts[:lookup] || config[:lookup] || MapsScraper.Maps
+      # Context yang mengerjakan satu baris, dipilih dari sumber job-nya.
+      lookups: opts[:lookups] || config[:lookups] || MapsScraper.Validation.sources(),
+      # Kalau diisi, menimpa seluruh sumber sekaligus. Dipakai test untuk
+      # mengganti seluruh jalur scraping dengan satu stub.
+      lookup: opts[:lookup] || config[:lookup]
     }
 
     {:ok, state}
@@ -213,7 +217,7 @@ defmodule MapsScraper.Validation.Queue do
       {:ok, job} ->
         item = Job.get_item(job, index)
         params = Map.merge(job.opts, %{"query" => item.query})
-        lookup = state.lookup
+        lookup = lookup_for(state, job.source)
 
         task =
           Task.Supervisor.async_nolink(@task_supervisor, fn ->
@@ -229,6 +233,9 @@ defmodule MapsScraper.Validation.Queue do
         }
     end
   end
+
+  defp lookup_for(%{lookup: lookup}, _source) when not is_nil(lookup), do: lookup
+  defp lookup_for(state, source), do: Map.fetch!(state.lookups, source)
 
   # ------------------------------------------------------------------
   # Hasil dan pengulangan
@@ -246,7 +253,7 @@ defmodule MapsScraper.Validation.Queue do
       Job.update_item(
         job,
         index,
-        &%{&1 | status: :ok, result: summarize(payload, state), error: nil}
+        &%{&1 | status: :ok, result: summarize(payload, state, job.source), error: nil}
       )
 
     put_job(state, job)
@@ -351,7 +358,7 @@ defmodule MapsScraper.Validation.Queue do
 
   defp describe(other), do: %{code: "unknown", message: inspect(other)}
 
-  defp summarize(payload, state) do
+  defp summarize(payload, state, source) do
     found = Map.get(payload, "found")
     best_match = Map.get(payload, "best_match")
 
@@ -360,7 +367,7 @@ defmodule MapsScraper.Validation.Queue do
       |> Map.get("results", [])
       |> sort_by_match()
       |> Enum.take(state.max_candidates)
-      |> Enum.map(&summarize_place/1)
+      |> Enum.map(&summarize_candidate(&1, source))
 
     %{
       found: found,
@@ -403,7 +410,22 @@ defmodule MapsScraper.Validation.Queue do
 
   defp ambiguous?(_candidates, _state), do: false
 
-  defp summarize_place(place) do
+  # Kandidat dipangkas ke kolom yang dibutuhkan penilai di luar service ini.
+  # Bentuknya berbeda per sumber: identitas stabil sebuah tempat adalah
+  # place_id/cid/ftid, sedangkan sebuah akun Instagram cukup username-nya.
+  defp summarize_candidate(place, "instagram") do
+    %{
+      username: place["username"],
+      full_name: place["full_name"],
+      profile_url: place["profile_url"],
+      followers: place["followers"],
+      verified: place["verified"],
+      private: place["private"],
+      match: place["match"]
+    }
+  end
+
+  defp summarize_candidate(place, _source) do
     %{
       name: place["name"],
       address: place["address"],

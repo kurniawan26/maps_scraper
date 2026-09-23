@@ -19,6 +19,13 @@ config :maps_scraper, :scraper,
   timeout: 45_000,
   detail_budget_ms: 60_000
 
+# Instagram tidak punya fase detail seperti Maps: seluruh kolom profil datang
+# dari satu halaman yang sama. Penyedia dapat ditukar tanpa menyentuh context —
+# lihat MapsScraper.Instagram.Provider.
+config :maps_scraper, :instagram,
+  provider: MapsScraper.Instagram.Provider.Playwright,
+  timeout: 45_000
+
 config :maps_scraper, :validation,
   concurrency: 3,
   max_attempts: 3,

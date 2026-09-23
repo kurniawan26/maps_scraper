@@ -1,13 +1,16 @@
 defmodule MapsScraper.Maps.Client do
   @moduledoc """
-  Pembungkus HTTP ke sidecar Playwright.
+  Permintaan scrape Google Maps ke sidecar.
 
-  Sidecar berjalan sebagai container terpisah (lihat `docker-compose.yml`) dan
-  hanya punya satu endpoint, `POST /scrape`, yang menerima query berupa kata
-  kunci maupun URL Google Maps.
+  Pengiriman HTTP-nya sendiri ditangani `MapsScraper.Scraper.Client`, yang
+  dipakai bersama sumber data lain. Yang tinggal di sini adalah yang khas Maps:
+  bagaimana batas waktu HTTP dihitung ketika `detail: true` membuat satu
+  permintaan membuka banyak halaman.
   """
 
-  require Logger
+  alias MapsScraper.Scraper.Client
+
+  @scrape_path "/scrape"
 
   @doc """
   Mengirim permintaan scrape ke sidecar.
@@ -22,40 +25,10 @@ defmodule MapsScraper.Maps.Client do
     # kalau tidak, kedua sisi memegang angka sendiri-sendiri.
     body = Map.merge(opts, %{query: query, timeout: page_timeout})
 
-    options =
-      Keyword.merge(
-        [json: body, receive_timeout: receive_timeout(opts, page_timeout), retry: false],
-        req_options()
-      )
-
-    case Req.post(base_url() <> "/scrape", options) do
-      {:ok, %Req.Response{status: 200, body: payload}} ->
-        {:ok, payload}
-
-      {:ok, %Req.Response{status: status, body: %{"error" => error}}} ->
-        {:error, {:scraper, status, error}}
-
-      {:ok, %Req.Response{status: status}} ->
-        {:error, {:scraper, status, %{"code" => "unknown", "message" => "Sidecar gagal"}}}
-
-      {:error, %Req.TransportError{reason: :timeout}} ->
-        {:error, :timeout}
-
-      {:error, exception} ->
-        Logger.error("sidecar tidak dapat dihubungi: #{Exception.message(exception)}")
-        {:error, :unavailable}
-    end
+    Client.post(@scrape_path, body, receive_timeout(opts, page_timeout))
   end
 
-  def health do
-    options = Keyword.merge([receive_timeout: 5_000, retry: false], req_options())
-
-    case Req.get(base_url() <> "/health", options) do
-      {:ok, %Req.Response{status: 200, body: body}} -> {:ok, body}
-      {:ok, %Req.Response{status: status}} -> {:error, {:scraper, status, %{}}}
-      {:error, _} -> {:error, :unavailable}
-    end
-  end
+  defdelegate health, to: Client
 
   # Timeout HTTP harus lebih longgar dari yang dipakai browser, kalau tidak
   # koneksi putus duluan dan pesan error aslinya hilang.
@@ -70,15 +43,6 @@ defmodule MapsScraper.Maps.Client do
       if Map.get(opts, :detail, false), do: config(:detail_budget_ms, 60_000), else: 0
 
     page_timeout + detail_budget + 15_000
-  end
-
-  defp base_url, do: config(:base_url) |> String.trim_trailing("/")
-
-  # Dipakai test untuk menyuntikkan stub Req.Test menggantikan sidecar sungguhan.
-  defp req_options do
-    :maps_scraper
-    |> Application.get_env(:scraper, [])
-    |> Keyword.get(:req_options, [])
   end
 
   defp config(key) do

@@ -65,6 +65,14 @@ if scraper_overrides != [] do
   config :maps_scraper, :scraper, scraper_overrides
 end
 
+instagram_overrides =
+  [timeout: env_int.("INSTAGRAM_TIMEOUT_MS")]
+  |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+
+if instagram_overrides != [] do
+  config :maps_scraper, :instagram, instagram_overrides
+end
+
 # Antrean validasi massal dapat disetel per-deployment tanpa rebuild.
 #
 # Berkas ini dievaluasi untuk SEMUA environment, termasuk test. Karena itu hanya

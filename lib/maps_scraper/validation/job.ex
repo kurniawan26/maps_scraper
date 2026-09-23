@@ -8,8 +8,19 @@ defmodule MapsScraper.Validation.Job do
 
   alias MapsScraper.Validation.Job
 
-  @enforce_keys [:id, :queries, :opts, :items, :inserted_at]
-  defstruct [:id, :queries, :opts, :items, :inserted_at, :finished_at, status: :queued]
+  @enforce_keys [:id, :source, :queries, :opts, :items, :inserted_at]
+  defstruct [
+    :id,
+    :source,
+    :queries,
+    :opts,
+    :items,
+    :inserted_at,
+    :finished_at,
+    status: :queued
+  ]
+
+  @default_source "maps"
 
   @type item_status :: :pending | :running | :ok | :error
   @type t :: %Job{}
@@ -25,6 +36,10 @@ defmodule MapsScraper.Validation.Job do
 
     %Job{
       id: Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false),
+      # Sumber ikut disimpan di job, bukan hanya dipakai saat memilih context:
+      # bentuk kandidat yang dirangkum antrean berbeda per sumber, dan job yang
+      # sudah selesai masih harus bisa menjelaskan dirinya sendiri.
+      source: Map.get(opts, "source", @default_source),
       queries: queries,
       opts: opts,
       items: items,
@@ -64,6 +79,7 @@ defmodule MapsScraper.Validation.Job do
 
     %{
       job_id: job.id,
+      source: job.source,
       status: job.status,
       total: map_size(job.items),
       counts: counts,
