@@ -41,6 +41,10 @@ RUN mix deps.get --only $MIX_ENV
 COPY config/config.exs config/prod.exs config/
 RUN mix deps.compile
 
+# priv/ membawa migrasi. Tanpanya release tetap start, tetapi auto_migrate tidak
+# menemukan satu migrasi pun ("Migrations already up") dan tabel oban_jobs tidak
+# pernah dibuat — setiap POST /api/validations lalu dijawab 500.
+COPY priv priv
 COPY lib lib
 RUN mix compile
 

@@ -1241,6 +1241,18 @@ Request pertama `POST /api/validations` (membalas `202` + `job_id`), lalu node
 kedua `GET /api/validations/{{ $json.job_id }}` yang diulang — biasanya dengan
 node **Wait** di antaranya — sampai `status` menjadi `done`.
 
+Dua alur kerja siap pakai ada di `n8n/`: `validate-usaha.json` (satu usaha lewat
+`POST /api/validate`) dan `validate-batch.json` (pola dua langkah di atas, dengan
+batas tunggu 10 menit). Impor lewat menu *Import from File*, atau dari CLI:
+
+```bash
+docker cp n8n/. maps_scraper_n8n:/tmp/wf/
+docker exec maps_scraper_n8n n8n import:workflow --separate --input=/tmp/wf/
+```
+
+Keduanya memanggil `http://app:4000`. Kalau Phoenix dijalankan di host, ganti
+dengan `http://host.docker.internal:4000`.
+
 ### Produksi
 
 `docker-compose.yml` ditujukan untuk development — ia **membangun** image dari
