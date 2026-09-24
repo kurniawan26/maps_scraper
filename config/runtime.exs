@@ -162,6 +162,14 @@ if config_env() == :prod do
 
   config :maps_scraper, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
+  # Host yang boleh diakses lewat http biasa, dipisah koma — misalnya IP LAN
+  # saat aplikasi hanya dilayani di jaringan lokal tanpa reverse proxy TLS.
+  config :maps_scraper,
+         :ssl_exclude_hosts,
+         System.get_env("SSL_EXCLUDE_HOSTS", "")
+         |> String.split(",", trim: true)
+         |> Enum.map(&String.trim/1)
+
   config :maps_scraper, MapsScraperWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [

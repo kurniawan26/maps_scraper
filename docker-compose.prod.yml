@@ -85,6 +85,9 @@ services:
 
       SECRET_KEY_BASE: "${SECRET_KEY_BASE:?SECRET_KEY_BASE belum diisi - jalankan: mix phx.gen.secret}"
       PHX_HOST: "${PHX_HOST:?PHX_HOST belum diisi - isi domain publik yang dipakai reverse proxy}"
+      # Host yang dilayani lewat http tanpa dialihkan ke https, dipisah koma.
+      # Untuk akses LAN saja: isi dengan IP yang sama dengan APP_BIND.
+      SSL_EXCLUDE_HOSTS: "${SSL_EXCLUDE_HOSTS:-}"
 
       VALIDATION_CONCURRENCY: "${VALIDATION_CONCURRENCY:-3}"
       VALIDATION_MAX_ATTEMPTS: "${VALIDATION_MAX_ATTEMPTS:-3}"
