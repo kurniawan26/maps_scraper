@@ -4,15 +4,12 @@ defmodule MapsScraperWeb.FallbackController do
   """
   use MapsScraperWeb, :controller
 
-  # Parameter request tidak lolos validasi.
   def call(conn, {:error, {:invalid, field, message}}) do
     conn
     |> put_status(:unprocessable_entity)
     |> json(%{error: %{code: "invalid_params", field: field, message: message}})
   end
 
-  # URL yang diminta menunjuk alamat internal. 403, bukan 5xx: masukannya yang
-  # bermasalah, dan mengulanginya tidak akan mengubah apa pun.
   def call(conn, {:error, {:blocked, host}}) do
     conn
     |> put_status(:forbidden)
@@ -25,7 +22,6 @@ defmodule MapsScraperWeb.FallbackController do
     })
   end
 
-  # Sidecar menjawab, tapi dengan error — teruskan status dan pesannya apa adanya.
   def call(conn, {:error, {:scraper, status, error}}) do
     conn
     |> put_status(status)

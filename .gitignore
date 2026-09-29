@@ -1,42 +1,27 @@
-# The directory Mix will write compiled artifacts to.
 /_build/
 
-# If you run "mix test --cover", coverage assets end up here.
 /cover/
 
-# The directory Mix downloads your dependencies sources to.
 /deps/
 
-# Where 3rd-party dependencies like ExDoc output generated docs.
 /doc/
 
-# Ignore .fetch files in case you like to edit your project deps locally.
 /.fetch
 
-# If the VM crashes, it generates a dump, let's ignore it too.
 erl_crash.dump
 
-# Also ignore archive artifacts (built via "mix archive.build").
 *.ez
 
-# Temporary files, for example, from tests.
 /tmp/
 
-# Ignore package tarball (built via "mix hex.build").
 maps_scraper-*.tar
 
-# Dependensi sidecar Node. Dipasang di dalam image lewat scraper/Dockerfile,
-# tidak pernah ikut commit.
 scraper/node_modules/
 
-# Konfigurasi lokal. .env berisi kredensial sungguhan dan tidak boleh ikut commit;
-# yang dibagikan hanya .env.example.
 .env
 .env.*
 !.env.example
 
-# Berkas SQLite antrean validasi. Isinya milik masing-masing mesin, dan di
-# produksi hidup di volume Docker — bukan sesuatu yang dibagikan lewat git.
 *.db
 *.db-shm
 *.db-wal

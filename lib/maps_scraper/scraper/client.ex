@@ -57,7 +57,6 @@ defmodule MapsScraper.Scraper.Client do
 
   defp base_url, do: config(:base_url) |> String.trim_trailing("/")
 
-  # Dipakai test untuk menyuntikkan stub Req.Test menggantikan sidecar sungguhan.
   defp req_options do
     :maps_scraper
     |> Application.get_env(:scraper, [])

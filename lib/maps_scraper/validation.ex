@@ -46,8 +46,6 @@ defmodule MapsScraper.Validation do
     "marketplace" => Marketplace
   }
 
-  # Opsi yang boleh diteruskan ke antrean, per sumber. Disaring di sini supaya
-  # kolom asing dari body request tidak ikut tersimpan.
   @option_keys %{
     "maps" => ~w(limit detail lang country name),
     "instagram" => ~w(lang country name),
@@ -68,10 +66,6 @@ defmodule MapsScraper.Validation do
   Opsi berlaku untuk seluruh baris dalam batch.
   """
   def enqueue(params) when is_map(params) do
-    # Sumber, baris, dan opsi divalidasi di sini, bukan hanya saat tiap baris
-    # dikerjakan. Tanpa ini `{"queries": [...], "limit": "abc"}` dijawab 202
-    # lebih dulu, lalu seluruh barisnya gagal satu per satu — klien baru tahu
-    # batch-nya sia-sia setelah polling.
     with {:ok, source} <- fetch_source(params),
          {:ok, queries} <- fetch_queries(params, source),
          {:ok, _opts} <- context(source).validate_options(params) do
@@ -118,10 +112,6 @@ defmodule MapsScraper.Validation do
     |> Keyword.get(:validation, 0)
   end
 
-  # ------------------------------------------------------------------
-  # Penyimpanan
-  # ------------------------------------------------------------------
-
   defp insert_batch(source, queries, opts) do
     now = DateTime.utc_now()
     id = Batch.generate_id()
@@ -148,7 +138,6 @@ defmodule MapsScraper.Validation do
 
     {:ok, batch} =
       Repo.transaction(fn ->
-        # headroom: 1 menyediakan tempat untuk batch yang sedang dimasukkan ini.
         Retention.sweep(headroom: 1)
 
         batch =
@@ -168,10 +157,6 @@ defmodule MapsScraper.Validation do
 
     {:ok, batch}
   end
-
-  # ------------------------------------------------------------------
-  # Validasi masukan
-  # ------------------------------------------------------------------
 
   defp context(source), do: Map.fetch!(@sources, source)
 
@@ -238,10 +223,6 @@ defmodule MapsScraper.Validation do
     end
   end
 
-  # Instagram menunjuk satu akun secara pasti, jadi baris yang bukan username
-  # maupun URL profil tidak akan pernah berhasil betapa pun sering diulang.
-  # Menolaknya sekarang lebih baik daripada memulangkannya satu per satu
-  # sebagai kegagalan permanen setelah klien mengira batch-nya diterima.
   defp validate_rows(queries, "instagram") do
     case Enum.find(queries, &match?({:error, _}, Instagram.normalize_username(&1))) do
       nil -> {:ok, queries}
@@ -256,8 +237,6 @@ defmodule MapsScraper.Validation do
     end
   end
 
-  # Sama alasannya, ditambah satu: baris yang menunjuk alamat internal ditolak
-  # sekarang, bukan setelah 500 baris terlanjur masuk antrean.
   defp validate_rows(queries, "website") do
     Enum.reduce_while(queries, {:ok, queries}, fn query, acc ->
       case Website.normalize_url(query) do
@@ -276,9 +255,6 @@ defmodule MapsScraper.Validation do
     end)
   end
 
-  # Nama toko telanjang ambigu — "samsung" ada di kedua platform sebagai toko
-  # yang berbeda — jadi baris wajib menyebut host, dan yang tidak menyebutnya
-  # ditolak sekarang, bukan setelah batch terlanjur diterima.
   defp validate_rows(queries, "marketplace") do
     case Enum.find(queries, &match?({:error, _}, Marketplace.normalize_store(&1))) do
       nil -> {:ok, queries}

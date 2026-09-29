@@ -6,7 +6,6 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
-# Browser sudah ada di dalam image, jadi install paket saja
 COPY package.json ./
 RUN npm install --omit=dev --no-audit --no-fund
 

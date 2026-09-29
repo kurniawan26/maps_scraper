@@ -1,9 +1,6 @@
 defmodule MapsScraperWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :maps_scraper
 
-  # Endpoint ini hanya melayani JSON API: tidak ada berkas statis, socket
-  # LiveView, maupun session cookie — semuanya tidak terpakai tanpa frontend.
-
   if code_reloading? do
     plug Phoenix.CodeReloader
   end

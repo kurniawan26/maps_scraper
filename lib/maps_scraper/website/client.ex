@@ -10,9 +10,6 @@ defmodule MapsScraper.Website.Client do
 
   @scrape_path "/scrape/website"
 
-  # Sidecar menyelesaikan rantai pengalihan lebih dulu di luar browser, jadi
-  # satu permintaan bisa berisi beberapa lompatan sebelum halamannya dibuka.
-  # Kelonggarannya lebih besar daripada Instagram karena itu.
   @slack_ms 20_000
 
   def scrape(query, opts \\ %{}) do

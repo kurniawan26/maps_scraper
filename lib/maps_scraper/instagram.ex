@@ -25,13 +25,10 @@ defmodule MapsScraper.Instagram do
 
   @default_provider MapsScraper.Instagram.Provider.Playwright
 
-  # Aturan Instagram sendiri: huruf, angka, titik, garis bawah, maksimal 30.
   @username_format ~r/^[a-z0-9._]{1,30}$/i
 
   @instagram_hosts ["instagram.com", "instagr.am", "ig.me"]
 
-  # Segmen pertama URL Instagram yang bukan username. Tanpa daftar ini,
-  # "/p/ABC123/" akan dibaca sebagai profil bernama "p".
   @reserved_paths ~w(p reel reels stories explore accounts direct tv s about
                      developer legal privacy terms api challenge oauth)
 
@@ -111,10 +108,6 @@ defmodule MapsScraper.Instagram do
     |> Keyword.get(:provider, @default_provider)
   end
 
-  # Username Instagram boleh memuat titik dan garis bawah, tetapi tidak pernah
-  # garis miring. Kehadiran "/" karena itu cukup untuk membedakan tautan dari
-  # username — termasuk tautan yang ditulis tanpa skema, seperti yang biasa
-  # disalin orang dari bilah alamat: "instagram.com/kournicloud".
   defp url_like?(query), do: String.contains?(query, "/")
 
   defp with_scheme(query) do
@@ -183,9 +176,6 @@ defmodule MapsScraper.Instagram do
   defp name_too_long,
     do: {:error, {:invalid, "name", "maksimal #{@name_max_length} karakter"}}
 
-  # Kode bahasa/region diteruskan apa adanya ke sidecar dan masuk ke `locale`
-  # context Playwright. Nilai yang bukan kode membuat pembuatan context gagal,
-  # jadi bentuknya diperiksa di sini.
   defp fetch_code(params, key, default, format) do
     case Map.get(params, key) do
       value when is_binary(value) ->

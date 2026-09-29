@@ -21,15 +21,11 @@ defmodule MapsScraper.MarketplaceTest do
     end
 
     test "menolak nama toko telanjang tanpa host" do
-      # "samsung" ada di kedua platform sebagai toko yang berbeda, jadi masukan
-      # tanpa host tidak punya jawaban tunggal.
       assert {:error, {:invalid, "query", _}} = Marketplace.normalize_store("samsung")
       assert {:error, {:invalid, "query", _}} = Marketplace.normalize_store("@samsung")
     end
 
     test "menolak jalur yang bukan halaman toko" do
-      # Tanpa daftar jalur cadangan, "tokopedia.com/search" terbaca sebagai toko
-      # bernama "search".
       assert {:error, _} = Marketplace.normalize_store("tokopedia.com/search")
       assert {:error, _} = Marketplace.normalize_store("tokopedia.com/cart")
       assert {:error, _} = Marketplace.normalize_store("shopee.co.id/daily-discover")

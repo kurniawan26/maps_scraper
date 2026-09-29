@@ -20,15 +20,12 @@ defmodule MapsScraper.InstagramTest do
     end
 
     test "menerima tautan tanpa skema, seperti yang biasa disalin orang" do
-      # Field bernama `instagram_url` pada pintu gabungan hampir pasti diisi
-      # bentuk ini, bukan URL lengkap.
       assert Instagram.normalize_username("instagram.com/natgeo") == {:ok, "natgeo"}
       assert Instagram.normalize_username("www.instagram.com/natgeo/") == {:ok, "natgeo"}
       assert Instagram.input_type("instagram.com/natgeo") == :url
     end
 
     test "menolak URL Instagram yang bukan profil" do
-      # Tanpa daftar jalur cadangan, "/p/ABC123/" terbaca sebagai akun bernama "p".
       assert {:error, {:invalid, "query", _}} =
                Instagram.normalize_username("https://www.instagram.com/p/ABC123/")
 
@@ -66,8 +63,6 @@ defmodule MapsScraper.InstagramTest do
 
   describe "validate_options/1" do
     test "defaultnya en/US, bukan id/ID seperti Maps" do
-      # Seluruh penanda yang dibaca sidecar — "Followers", "Profile isn't
-      # available", lencana "Verified" — ikut berubah mengikuti bahasa halaman.
       assert {:ok, %{lang: "en", country: "US", name: nil}} = Instagram.validate_options(%{})
     end
 

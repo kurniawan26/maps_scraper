@@ -31,7 +31,6 @@ defmodule MapsScraper.TikTokTest do
     end
 
     test "menolak URL TikTok yang bukan profil" do
-      # Jalur profil TikTok selalu diawali "@"; tanpa itu, bukan akun.
       assert {:error, {:invalid, "query", _}} =
                TikTok.normalize_username("https://www.tiktok.com/explore")
 
@@ -43,8 +42,6 @@ defmodule MapsScraper.TikTokTest do
     end
 
     test "menolak tautan pendek dengan pesan yang menjelaskan sebabnya" do
-      # vt/vm.tiktok.com menunjuk video; akunnya baru ketahuan setelah
-      # pengalihannya diikuti.
       assert {:error, {:invalid, "query", pesan}} =
                TikTok.normalize_username("https://vt.tiktok.com/ZSabc123/")
 

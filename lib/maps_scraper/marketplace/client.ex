@@ -10,9 +10,6 @@ defmodule MapsScraper.Marketplace.Client do
 
   @scrape_path "/scrape/marketplace"
 
-  # Shopee dibaca dua kali ketika jawabannya menunjukkan toko tidak ada —
-  # konfirmasi yang menjaga gangguan sesaat tidak terbaca sebagai "tidak ada".
-  # Kelonggarannya harus menampung dua kali muat halaman.
   @slack_ms 30_000
 
   def scrape(query, opts \\ %{}) do

@@ -22,7 +22,6 @@ defmodule MapsScraper.WebsiteTest do
     end
 
     test "menolak skema selain http(s)" do
-      # Tanpa penjagaan ini, "file:///etc/passwd" ikut diterima sebagai website.
       assert {:error, {:invalid, "query", _}} = Website.normalize_url("file:///etc/passwd")
       assert {:error, {:invalid, "query", _}} = Website.normalize_url("data:text/html,<h1>x")
       assert {:error, {:invalid, "query", _}} = Website.normalize_url("javascript:alert(1)")
@@ -37,8 +36,6 @@ defmodule MapsScraper.WebsiteTest do
     end
 
     test "host satu suku kata diteruskan ke pemeriksa alamat" do
-      # Menolaknya di sini akan melaporkan "localhost" sebagai "bukan domain",
-      # padahal sebabnya adalah ia menunjuk mesin di dalam jaringan.
       assert {:ok, %URI{host: "localhost"}} = Website.normalize_url("localhost")
       assert {:error, {:blocked, "localhost"}} = Website.lookup(%{"query" => "localhost"})
     end
@@ -50,8 +47,6 @@ defmodule MapsScraper.WebsiteTest do
   end
 
   describe "ensure_public/1" do
-    # Seluruh kasus memakai alamat literal supaya tidak bergantung DNS —
-    # hasilnya sama di mesin mana pun, dan tidak ada permintaan jaringan.
     test "meloloskan alamat publik" do
       assert Website.ensure_public(%URI{host: "8.8.8.8"}) == :ok
       assert Website.ensure_public(%URI{host: "1.1.1.1"}) == :ok
@@ -65,7 +60,6 @@ defmodule MapsScraper.WebsiteTest do
     end
 
     test "menolak endpoint metadata cloud" do
-      # Sasaran SSRF paling klasik: kredensial instance ada di balik alamat ini.
       assert {:error, {:blocked, _}} = Website.ensure_public(%URI{host: "169.254.169.254"})
     end
 
@@ -76,21 +70,15 @@ defmodule MapsScraper.WebsiteTest do
     end
 
     test "menolak IPv4 yang menyamar sebagai IPv6" do
-      # ::ffff:127.0.0.1 adalah loopback yang ditulis dalam notasi IPv6. Tanpa
-      # dikembalikan ke bentuk IPv4-nya, ia lolos dari pemeriksaan IPv6.
       assert {:error, {:blocked, _}} = Website.ensure_public(%URI{host: "::ffff:127.0.0.1"})
       assert Website.ensure_public(%URI{host: "::ffff:8.8.8.8"}) == :ok
     end
 
     test "menolak nama yang menunjuk loopback, bukan hanya alamatnya" do
-      # Pemeriksaan berbasis nama tidak akan melihat ini; yang diperiksa harus
-      # alamat hasil resolusi.
       assert {:error, {:blocked, "localhost"}} = Website.ensure_public(%URI{host: "localhost"})
     end
 
     test "nama yang tidak dapat diresolusi dibiarkan lewat" do
-      # Itu urusan sidecar, yang menjawabnya sebagai dns_not_found — "tidak
-      # ada", bukan "diblokir". Membedakannya penting bagi pemanggil.
       assert Website.ensure_public(%URI{host: "zzqq-tidak-ada-99999.invalid"}) == :ok
     end
   end

@@ -13,9 +13,6 @@ defmodule MapsScraper.Instagram.Provider.Playwright do
 
   @scrape_path "/scrape/instagram"
 
-  # Tidak ada fase detail seperti pada Maps: seluruh kolom profil datang dari
-  # satu halaman yang sama, jadi batas waktunya cukup timeout halaman ditambah
-  # kelonggaran supaya pesan error sidecar sempat sampai sebelum koneksi putus.
   @slack_ms 15_000
 
   @impl true

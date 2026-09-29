@@ -171,9 +171,6 @@ defmodule MapsScraper.Maps do
     end
   end
 
-  # Kode bahasa/region diteruskan apa adanya ke sidecar: masuk ke `locale`
-  # context Playwright dan ke parameter hl/gl pada URL. Nilai yang bukan kode
-  # membuat pembuatan context gagal, jadi bentuknya diperiksa di sini.
   defp fetch_code(params, key, default, format) do
     case Map.get(params, key) do
       value when is_binary(value) ->

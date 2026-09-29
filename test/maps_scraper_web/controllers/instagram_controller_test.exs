@@ -90,8 +90,6 @@ defmodule MapsScraperWeb.InstagramControllerTest do
     end
 
     test "penolakan Instagram diteruskan sebagai 503, bukan 404", %{conn: conn} do
-      # Ini pembedaan yang menentukan: "tidak terbaca" bukan "tidak ada".
-      # Sebagai 404, baris yang sebenarnya punya akun akan dihapus pemanggil.
       stub_error(503, %{
         "code" => "instagram_blocked",
         "message" => "Instagram mengalihkan ke halaman login"
@@ -120,7 +118,6 @@ defmodule MapsScraperWeb.InstagramControllerTest do
         |> post(~p"/api/instagram", %{query: "kournicloud", name: "Warung Sate Pak Budi"})
         |> json_response(200)
 
-      # Akunnya ada, tapi bukan milik usaha yang dicari.
       assert body["found"] == true
       assert body["best_match"] == 0
     end

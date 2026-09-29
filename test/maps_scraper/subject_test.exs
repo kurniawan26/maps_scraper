@@ -1,6 +1,4 @@
 defmodule MapsScraper.SubjectTest do
-  # Kanal dijalankan pada proses terpisah, jadi stub Req harus dibagikan —
-  # dan mode bagi-pakai hanya boleh dipakai test yang tidak paralel.
   use ExUnit.Case, async: false
 
   alias MapsScraper.Scraper.Client
@@ -10,8 +8,6 @@ defmodule MapsScraper.SubjectTest do
 
   defp set_req_test_to_shared(context), do: Req.Test.set_req_test_to_shared(context)
 
-  # Sidecar dijawab berdasarkan jalur yang diminta, jadi satu stub melayani
-  # keempat kanal sekaligus.
   defp stub(handlers) do
     Req.Test.stub(Client, fn conn ->
       case Map.fetch(handlers, conn.request_path) do
@@ -85,8 +81,6 @@ defmodule MapsScraper.SubjectTest do
     end
 
     test "nama yang tidak cocok membuat kanal divonis tidak cocok walau ketemu" do
-      # Inti pendekatan ini: tautan yang hidup belum berarti milik usaha yang
-      # dimaksud. Tanpa perbandingan nama, ketiganya akan lolos begitu saja.
       stub(%{
         "/scrape/website" =>
           json(payload(true, 0, [%{"title" => "Bengkel Motor Jaya", "match" => 0}]))
@@ -126,13 +120,10 @@ defmodule MapsScraper.SubjectTest do
       assert hasil.channels.website.status == :ok
       assert hasil.channels.shopee.status == :error
       assert hasil.channels.shopee.error["code"] == "shopee_blocked"
-      # Kegagalan sementara ditandai supaya pemanggil tahu layak dicoba lagi.
       assert hasil.channels.shopee.retryable == true
     end
 
     test "menyilangkan website yang dideklarasikan Maps dengan yang dikirim" do
-      # Bukti terkuat yang tersedia gratis: listing Maps memuat website milik
-      # usaha itu sendiri, dan datanya sudah ikut terbawa.
       stub(%{
         "/scrape" =>
           json(

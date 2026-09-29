@@ -55,7 +55,6 @@ command -v docker >/dev/null 2>&1 || die "docker tidak ditemukan di PATH"
 docker info >/dev/null 2>&1 || die "daemon Docker tidak dapat dihubungi"
 [ -f Dockerfile ] && [ -f scraper/Dockerfile ] || die "dijalankan dari luar root proyek"
 
-# Daftar apa yang akan dikerjakan, sebelum mengerjakannya.
 targets=()
 [ "$BUILD_APP" = 1 ]     && targets+=("${APP_REPO}:${TAG}|.|app (Phoenix)")
 [ "$BUILD_SCRAPER" = 1 ] && targets+=("${SCRAPER_REPO}:${TAG}|./scraper|scraper (Playwright, ~3,5 GB)")
@@ -69,8 +68,6 @@ for t in "${targets[@]}"; do
 done
 printf '  %-14s %s\n' "dorong" "$([ "$PUSH" = 1 ] && echo ya || echo tidak)"
 
-# Mendorong berarti menerbitkan image ke registry publik, jadi dikonfirmasi dulu
-# kecuali diminta lain atau dijalankan tanpa terminal (CI).
 if [ "$PUSH" = 1 ] && [ "$ASSUME_YES" = 0 ] && [ -t 0 ]; then
   printf '\nDorong ke registry setelah build? [y/N] '
   read -r answer
@@ -112,8 +109,6 @@ if [ "$PUSH" = 1 ]; then
     push_one "$image"
   done
 
-  # Digest baru diketahui setelah push. Ini yang sebaiknya dipakai di produksi:
-  # tag bergerak tidak meninggalkan jejak versi dan tidak bisa di-rollback.
   say "Patok di .env produksi dengan digest berikut:"
   echo
   for t in "${targets[@]}"; do

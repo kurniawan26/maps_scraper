@@ -94,8 +94,6 @@ defmodule MapsScraperWeb.TikTokControllerTest do
     end
 
     test "WAF TikTok diteruskan sebagai 503, bukan 404", %{conn: conn} do
-      # "Tidak terbaca" bukan "tidak ada". Sebagai 404, baris yang sebenarnya
-      # punya akun akan dihapus pemanggil.
       stub_error(503, %{
         "code" => "tiktok_blocked",
         "message" => "TikTok tidak menyajikan data profil (WAF/captcha)"
@@ -126,7 +124,6 @@ defmodule MapsScraperWeb.TikTokControllerTest do
         |> post(~p"/api/tiktok", %{query: "kopikenangan", name: "Warung Sate Pak Budi"})
         |> json_response(200)
 
-      # Handle-nya ada, tapi bukan milik usaha yang dicari.
       assert body["found"] == true
       assert body["best_match"] == 0
     end

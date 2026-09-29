@@ -34,7 +34,6 @@ defmodule MapsScraper.Subject do
   alias MapsScraper.Validation.Verdict
   alias MapsScraper.Website
 
-  # {field pada payload, nama kanal pada response, context yang mengerjakannya}
   @channels [
     {"google_maps_url", :google_maps, Maps},
     {"instagram_url", :instagram, Instagram},
@@ -80,10 +79,6 @@ defmodule MapsScraper.Subject do
   @doc "Field kanal yang dikenali, berurutan."
   def channel_fields, do: Enum.map(@channels, fn {field, _key, _context} -> field end)
 
-  # ------------------------------------------------------------------
-  # Menjalankan kanal
-  # ------------------------------------------------------------------
-
   defp run(channels, name, opts) do
     channels
     |> Task.async_stream(
@@ -96,8 +91,6 @@ defmodule MapsScraper.Subject do
         {key, context.lookup(params)}
       end,
       max_concurrency: max_concurrency(),
-      # Batas waktu sesungguhnya dipegang tiap client HTTP; menaruh batas kedua
-      # di sini hanya akan memutus kanal yang sebenarnya masih berjalan.
       timeout: :infinity,
       ordered: true
     )
@@ -121,8 +114,6 @@ defmodule MapsScraper.Subject do
       platform: Map.get(payload, "platform"),
       reason: Map.get(payload, "reason"),
       count: Map.get(payload, "count"),
-      # Hasilnya dibawa utuh, tidak dipangkas seperti pada antrean — justru
-      # kolom lengkap inilah yang membuat pintu ini berguna.
       results: results
     }
   end
@@ -130,10 +121,6 @@ defmodule MapsScraper.Subject do
   defp channel({:error, reason}) do
     %{status: :error, error: Failure.describe(reason), retryable: Failure.retryable?(reason)}
   end
-
-  # ------------------------------------------------------------------
-  # Merangkum
-  # ------------------------------------------------------------------
 
   defp assemble(name, channels, results) do
     ok = for {_key, %{status: :ok} = hasil} <- results, do: hasil
@@ -155,10 +142,6 @@ defmodule MapsScraper.Subject do
     end)
   end
 
-  # Listing Google Maps memuat website dan telepon yang dideklarasikan usaha itu
-  # sendiri. Membandingkannya dengan website yang kamu kirim adalah bukti yang
-  # jauh lebih kuat daripada kemiripan nama — dan datanya sudah ikut terbawa,
-  # jadi tidak ada permintaan tambahan.
   defp cross_check(channels, results) do
     with %{status: :ok, results: [place | _]} <- Map.get(results, :google_maps),
          maps_website when is_binary(maps_website) <- place["website"] do
@@ -198,10 +181,6 @@ defmodule MapsScraper.Subject do
     end
   end
 
-  # ------------------------------------------------------------------
-  # Masukan
-  # ------------------------------------------------------------------
-
   defp fetch_channels(params) do
     channels =
       for {field, key, context} <- @channels,
@@ -219,9 +198,6 @@ defmodule MapsScraper.Subject do
     end
   end
 
-  # Tiap kanal memvalidasi bentuk masukannya dengan aturannya sendiri, sebelum
-  # satu pun permintaan dikirim. Tautan yang salah bentuk ditolak sekarang,
-  # bukan setelah empat kanal terlanjur berjalan.
   defp validate_each(channels) do
     Enum.reduce_while(channels, {:ok, channels}, fn {field, _key, _context, query}, acc ->
       case check(field, query) do
@@ -231,9 +207,6 @@ defmodule MapsScraper.Subject do
     end)
   end
 
-  # Maps menerima URL, nama tempat, alamat, maupun koordinat. URL memberi kolom
-  # paling lengkap karena menunjuk satu tempat secara pasti; bentuk lain tetap
-  # dilayani lewat pencarian.
   defp check("google_maps_url", query) do
     if byte_size(query) <= 512, do: :ok, else: {:error, "maksimal 512 karakter"}
   end
@@ -262,8 +235,6 @@ defmodule MapsScraper.Subject do
     end
   end
 
-  # Nama fieldnya sudah menjanjikan platformnya, jadi URL yang menunjuk platform
-  # lain ditolak — itu hampir pasti salah tempat isi, bukan maksud pemanggil.
   defp check("tokopedia_url", query), do: check_store(query, "tokopedia")
   defp check("shopee_url", query), do: check_store(query, "shopee")
 
@@ -311,9 +282,6 @@ defmodule MapsScraper.Subject do
 
   defp normalize(_), do: nil
 
-  # Satu usaha memakai sampai lima context browser sekaligus (Tokopedia tidak
-  # memakai satu pun). Batas ini menjaga satu permintaan tidak menghabiskan
-  # seluruh kapasitas sidecar.
   defp max_concurrency do
     :maps_scraper
     |> Application.get_env(:subject, [])

@@ -27,15 +27,8 @@ defmodule MapsScraper.TikTok do
 
   alias MapsScraper.TikTok.Client
 
-  # Aturan resmi TikTok: huruf, angka, titik, garis bawah, 2–24 karakter.
-  # Panjangnya dilonggarkan: handle yang kepanjangan cukup dijawab "tidak ada"
-  # oleh TikTok sendiri, sedangkan menolak handle lama yang ternyata sah
-  # membuang barisnya tanpa pernah diperiksa.
   @username_format ~r/^[a-z0-9._]{1,30}$/i
 
-  # vm.tiktok.com dan vt.tiktok.com sengaja tidak ada di sini: tautan pendek
-  # itu menunjuk video, dan akun pemiliknya baru ketahuan setelah
-  # pengalihannya diikuti.
   @tiktok_hosts ["tiktok.com", "m.tiktok.com"]
 
   @short_hosts ["vm.tiktok.com", "vt.tiktok.com"]
@@ -114,8 +107,6 @@ defmodule MapsScraper.TikTok do
   defp resolved(nil), do: {:error, {:invalid, "query", "bukan username maupun URL profil TikTok"}}
   defp resolved(username), do: {:ok, username}
 
-  # Username TikTok tidak pernah memuat garis miring, jadi kehadirannya cukup
-  # untuk membedakan tautan — termasuk yang ditulis tanpa skema.
   defp url_like?(query), do: String.contains?(query, "/")
 
   defp with_scheme(query) do
@@ -129,9 +120,6 @@ defmodule MapsScraper.TikTok do
 
   defp short_link?(uri), do: host_of(uri) in @short_hosts
 
-  # Berbeda dari Instagram, jalur profil TikTok selalu diawali "@". Itu
-  # sekaligus memisahkannya dari /explore, /tag, /music, dan sebagainya —
-  # tidak perlu daftar jalur cadangan.
   defp username_from_url(%URI{scheme: scheme, path: path} = uri)
        when scheme in ["http", "https"] do
     with true <- host_of(uri) in @tiktok_hosts,
@@ -192,8 +180,6 @@ defmodule MapsScraper.TikTok do
   defp name_too_long,
     do: {:error, {:invalid, "name", "maksimal #{@name_max_length} karakter"}}
 
-  # Kode bahasa/region diteruskan ke `locale` context Playwright. Nilai yang
-  # bukan kode membuat pembuatan context gagal, jadi bentuknya diperiksa di sini.
   defp fetch_code(params, key, default, format) do
     case Map.get(params, key) do
       value when is_binary(value) ->

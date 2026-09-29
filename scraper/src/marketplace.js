@@ -1,26 +1,11 @@
 import { withPage } from './browser.js';
 import { ScrapeError, matchScore } from './util.js';
 
-// Dua platform, dua cara baca yang berlawanan — dan itu hasil pengukuran,
-// bukan pilihan:
-//
-//   Tokopedia  HTTP polos berhasil dan mengembalikan og:title berisi nama toko;
-//              toko yang tidak ada dijawab 410 Gone. Browser justru DITOLAK di
-//              lapis HTTP/2 (ERR_HTTP2_PROTOCOL_ERROR), jadi memakai browser di
-//              sini bukan cuma mahal, tapi tidak jalan.
-//
-//   Shopee     HTTP polos hanya mendapat shell kosong yang identik untuk toko
-//              ada maupun tidak, dan API-nya menolak dengan 403. Tetapi DI DALAM
-//              browser, API yang sama dipanggil frontend-nya sendiri dan balas
-//              200 — jadi halamannya dibuka, lalu responsnya disadap.
-
 const USER_AGENT =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 
-// Endpoint internal yang dipanggil halaman toko Shopee.
 const SHOPEE_SHOP_API = /\/api\/v4\/shop\/get_shop_base/;
 
-// Berapa lama menunggu frontend Shopee memanggil API-nya sendiri.
 const SHOPEE_API_WAIT_MS = 12_000;
 
 function notFound(query, platform, reason) {
@@ -41,10 +26,6 @@ function unreadable(platform, reason, message) {
 }
 
 function found(query, platform, store, name) {
-  // Tanpa `name`, pertanyaannya cuma "apakah toko di URL ini ada" — dan URL-nya
-  // menunjuk satu toko secara pasti, jadi jawabannya 1. Dengan `name`,
-  // pertanyaannya "apakah toko ini milik usaha bernama X", dan itu diukur
-  // dengan matchScore yang sama dengan sumber lain.
   const match = name
     ? matchScore(name, { name: store.store_name, address: store.slug, category: platform })
     : 1;
@@ -61,17 +42,12 @@ function found(query, platform, store, name) {
   };
 }
 
-// --- Tokopedia -------------------------------------------------------------
-
-// og:title berbentuk "Toko <Nama> Online - Produk Lengkap & Harga Terbaik | Tokopedia".
 function tokopediaName(ogTitle) {
   if (typeof ogTitle !== 'string') return null;
 
   const match = ogTitle.match(/^Toko\s+(.+?)\s+Online\b/i);
   if (match) return match[1].trim() || null;
 
-  // Kalau formatnya berubah, judulnya dipakai apa adanya — lebih baik daripada
-  // melaporkan toko tanpa nama.
   return ogTitle.replace(/\s*\|\s*Tokopedia\s*$/i, '').trim() || null;
 }
 
@@ -92,13 +68,6 @@ function metaContent(html, property) {
     .trim();
 }
 
-// Tokopedia memasang Bot Manager Akamai di sebagian toko. Yang dikirim bukan
-// status error, melainkan halaman 200 berukuran kecil berisi meta-refresh ke
-// URL ber-token `bm-verify`. Perilakunya konsisten per toko, bukan acak:
-// sebagian toko selalu ditantang, sebagian tidak pernah.
-//
-// Mengikuti URL itu sekali, dengan cookie yang baru saja diberikan, cukup untuk
-// mendapatkan halaman aslinya.
 const TOKOPEDIA_CHALLENGE_MAX_BYTES = 8_000;
 
 function looksChallenged(html) {
@@ -141,11 +110,8 @@ async function fetchTokopedia(url, { timeout, lang, country, cookie = null, refe
 }
 
 function classifyTokopediaStatus(status) {
-  // 410 Gone adalah jawaban Tokopedia untuk toko yang tidak ada — status HTTP
-  // standar yang berarti persis itu, bukan tebakan dari isi halaman.
   if (status === 404 || status === 410) return 'missing';
 
-  // 403/429 berarti kita yang ditolak, bukan tokonya yang tidak ada.
   if (status === 401 || status === 403 || status === 429 || status >= 500) return 'unreadable';
 
   return 'ok';
@@ -184,8 +150,6 @@ async function readTokopedia(store, { timeout, lang, country }) {
 
     html = await response.text();
 
-    // Masih ditantang setelah dijawab sekali: itu "tidak tahu", bukan
-    // "toko tidak ada". Antrean yang akan mengulangnya.
     if (looksChallenged(html)) {
       unreadable('tokopedia', 'challenged', 'Tokopedia meminta verifikasi bot');
     }
@@ -212,8 +176,6 @@ async function readTokopedia(store, { timeout, lang, country }) {
   };
 }
 
-// --- Shopee ----------------------------------------------------------------
-
 async function readShopeeOnce(store, { timeout, lang, country }) {
   return withPage({ lang, country, timeout }, async (page) => {
     let payload = null;
@@ -223,14 +185,11 @@ async function readShopeeOnce(store, { timeout, lang, country }) {
       try {
         payload = await response.json();
       } catch {
-        // Respons yang bukan JSON tidak memberi tahu apa-apa; tunggu yang berikutnya.
       }
     });
 
     await page.goto(store.url, { waitUntil: 'domcontentloaded', timeout });
 
-    // Halaman Shopee tidak pernah merender nama tokonya untuk kita; yang
-    // ditunggu adalah panggilan API-nya sendiri, bukan elemen di DOM.
     const deadline = Date.now() + Math.min(timeout, SHOPEE_API_WAIT_MS);
     while (!payload && Date.now() < deadline) {
       await page.waitForTimeout(250);
@@ -243,18 +202,12 @@ async function readShopeeOnce(store, { timeout, lang, country }) {
 async function readShopee(store, options) {
   let payload = await readShopeeOnce(store, options);
 
-  // API tidak pernah dipanggil sama sekali: kita diblokir atau halamannya tidak
-  // selesai. Itu "tidak tahu", bukan "toko tidak ada".
   if (!payload) {
     unreadable('shopee', 'blocked', 'Shopee tidak mengembalikan data toko');
   }
 
   if (payload.error === 0 && payload.data?.name) return shopeeStore(store, payload);
 
-  // Shopee menjawab kegagalan dengan kode generik `1000000 service_err`, yang
-  // sama bunyinya untuk "toko tidak ada" maupun "layanan sedang bermasalah".
-  // Karena itu dikonfirmasi sekali lagi sebelum divonis: gangguan sesaat jarang
-  // terulang persis, sedangkan toko yang memang tidak ada selalu menjawab sama.
   const konfirmasi = await readShopeeOnce(store, options);
 
   if (!konfirmasi) {
@@ -283,8 +236,6 @@ function shopeeStore(store, payload) {
     }
   };
 }
-
-// --- Bersama ---------------------------------------------------------------
 
 function describeFailure(error) {
   const parts = [];

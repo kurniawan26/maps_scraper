@@ -52,7 +52,6 @@ services:
       start_period: 20s
 
   app:
-    # Aplikasi Phoenix (JSON API).
     image: ${APP_IMAGE:-kurniawan026/maps_validator:latest}
     pull_policy: always
     container_name: maps_scraper_app
@@ -62,18 +61,12 @@ services:
       scraper:
         condition: service_healthy
 
-    # Menempel ke loopback: prod.exs menyalakan force_ssl, jadi yang
-    # menghadap publik adalah reverse proxy yang mengakhiri TLS. Proxy itu wajib
-    # meneruskan `X-Forwarded-Proto: https`, kalau tidak Phoenix akan mengalihkan
-    # ke https terus-menerus. Isi APP_BIND=0.0.0.0 hanya kalau memang tidak ada
-    # proxy di depannya dan Anda paham konsekuensinya.
     ports:
       - "${APP_BIND:-127.0.0.1}:${APP_PORT:-4000}:4000"
     networks:
       - internal
 
     environment:
-      # Nama service dipakai sebagai host; keduanya di jaringan yang sama.
       SCRAPER_URL: "http://scraper:3000"
       SCRAPER_TIMEOUT_MS: "${SCRAPER_TIMEOUT_MS:-45000}"
       INSTAGRAM_TIMEOUT_MS: "${INSTAGRAM_TIMEOUT_MS:-45000}"
@@ -86,8 +79,6 @@ services:
 
       SECRET_KEY_BASE: "${SECRET_KEY_BASE:?SECRET_KEY_BASE belum diisi - jalankan: mix phx.gen.secret}"
       PHX_HOST: "${PHX_HOST:?PHX_HOST belum diisi - isi domain publik yang dipakai reverse proxy}"
-      # Host yang dilayani lewat http tanpa dialihkan ke https, dipisah koma.
-      # Untuk akses LAN saja: isi dengan IP yang sama dengan APP_BIND.
       SSL_EXCLUDE_HOSTS: "${SSL_EXCLUDE_HOSTS:-}"
 
       VALIDATION_CONCURRENCY: "${VALIDATION_CONCURRENCY:-3}"
@@ -104,17 +95,11 @@ services:
       VALIDATION_AMBIGUITY_MARGIN: "${VALIDATION_AMBIGUITY_MARGIN:-0.1}"
 
     volumes:
-      # Antrean validasi hidup di sini. Tanpa volume, batch yang belum
-      # selesai ikut hilang setiap container diganti — dan seluruh alasan
-      # memakai antrean persisten batal.
       - validation_data:/app/data
     init: true
 
-    # Antrean job ada di memori proses; hentikan dengan tenang supaya batch yang
-    # sedang jalan punya kesempatan menyelesaikan barisnya.
     stop_grace_period: 30s
 
-    # Phoenix rata di ~184 MB apa pun bebannya (README, "Kebutuhan memori").
     deploy:
       resources:
         limits:
@@ -136,6 +121,4 @@ networks:
     driver: bridge
 
 volumes:
-  # Berkas SQLite antrean validasi. Dinamai supaya selamat dari
-  # `docker compose down` — hanya `down -v` yang menghapusnya.
   validation_data:

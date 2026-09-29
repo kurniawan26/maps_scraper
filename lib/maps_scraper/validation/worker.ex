@@ -32,7 +32,6 @@ defmodule MapsScraper.Validation.Worker do
   alias MapsScraper.Validation.Row
   alias MapsScraper.Validation.Verdict
 
-  # Sidecar mengirim `Retry-After: 5` saat penuh; angkanya disamakan.
   @busy_snooze_seconds 5
 
   @doc """
@@ -59,8 +58,6 @@ defmodule MapsScraper.Validation.Worker do
     %{"batch_id" => batch_id, "index" => index} = args
 
     case load(batch_id, index) do
-      # Batch-nya sudah dibuang sementara job masih mengantre. Bukan kegagalan;
-      # tidak ada lagi yang perlu dikerjakan.
       nil -> :ok
       {row, batch} -> run(row, batch, attempt, max_attempts)
     end
@@ -96,7 +93,6 @@ defmodule MapsScraper.Validation.Worker do
   defp fail(row, batch, reason, attempt, max_attempts) do
     cond do
       Failure.busy?(reason) ->
-        # Barisnya dikembalikan ke status menunggu, bukan ditandai gagal.
         mark(row, status: "pending", error: Failure.describe(reason))
         {:snooze, @busy_snooze_seconds}
 
@@ -110,19 +106,11 @@ defmodule MapsScraper.Validation.Worker do
     end
   end
 
-  # Context yang meledak tidak boleh meninggalkan barisnya berstatus "running"
-  # selamanya. Tanpa penangkapan ini, job yang mati membuat batch-nya tidak
-  # pernah ditutup — Oban memang mengulang job-nya, tetapi kode yang menandai
-  # barisnya tidak pernah sempat jalan.
   defp call(lookup, params) do
     lookup.lookup(params)
   catch
     kind, reason -> {:error, {:crashed, {kind, reason}}}
   end
-
-  # ------------------------------------------------------------------
-  # Penyimpanan
-  # ------------------------------------------------------------------
 
   defp mark(row, fields) do
     fields = Keyword.put(fields, :updated_at, DateTime.utc_now())
@@ -130,8 +118,6 @@ defmodule MapsScraper.Validation.Worker do
     Repo.update_all(from(r in Row, where: r.id == ^row.id), set: fields)
   end
 
-  # Baris yang sudah selesai bisa jadi yang terakhir; batch-nya ditutup pada
-  # transaksi yang sama supaya `finished_at` tidak pernah tertinggal.
   defp settle(row, batch, fields) do
     Repo.transaction(fn ->
       mark(row, fields)
@@ -159,8 +145,6 @@ defmodule MapsScraper.Validation.Worker do
   defp lookup(source) do
     config = Application.get_env(:maps_scraper, :validation, [])
 
-    # `:lookup` menimpa seluruh sumber sekaligus — dipakai test untuk mengganti
-    # seluruh jalur scraping dengan satu stub.
     config[:lookup] || Map.fetch!(MapsScraper.Validation.sources(), source)
   end
 end

@@ -21,8 +21,6 @@ defmodule MapsScraper.Validation.Cleaner do
     sebelum = Retention.database_bytes()
     dihapus = Retention.sweep()
 
-    # VACUUM mengunci database, jadi hanya dijalankan kalau memang ada yang
-    # dihapus — menulis ulang berkas yang tidak berubah cuma membuang kunci.
     hasil = if dihapus > 0, do: Retention.vacuum(), else: {:ok, 0}
 
     sesudah = Retention.database_bytes()
@@ -35,8 +33,6 @@ defmodule MapsScraper.Validation.Cleaner do
         )
 
       {:error, error} ->
-        # Ruang disk tidak jadi kembali, tetapi datanya sudah terhapus. Bukan
-        # alasan menggagalkan job.
         Logger.warning("penyapuan: #{dihapus} batch dibuang, vacuum gagal: #{inspect(error)}")
     end
 

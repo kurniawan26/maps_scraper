@@ -38,12 +38,8 @@ defmodule MapsScraper.Marketplace do
 
   @tokopedia_host ~r/^([a-z0-9-]+\.)?tokopedia\.com$/i
 
-  # Shopee memakai domain berbeda per negara. Hanya shopee.co.id yang
-  # benar-benar diuji; sisanya mengikuti pola yang sama.
   @shopee_host ~r/^([a-z0-9-]+\.)?shopee\.(co\.id|com|sg|ph|vn|co\.th|com\.my|com\.br|tw)$/i
 
-  # Jalur yang bukan halaman toko. Tanpa daftar ini "tokopedia.com/search"
-  # dibaca sebagai toko bernama "search".
   @tokopedia_reserved ~w(search cart help about promo discovery p find login register
                          wishlist order-list contact-us rewards)
 

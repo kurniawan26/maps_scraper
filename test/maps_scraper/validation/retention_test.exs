@@ -30,9 +30,6 @@ defmodule MapsScraper.Validation.RetentionTest do
     batch
   end
 
-  # Dipisah dari `selesai!/1` dengan sengaja: `Validation.enqueue/1` ikut
-  # menyapu, jadi batch yang ditua-kan lebih dulu bisa lenyap saat batch
-  # berikutnya dimasukkan — dan test-nya mengukur hal yang salah.
   defp tuakan!(batch, umur_detik, kolom \\ :finished_at) do
     waktu = DateTime.add(DateTime.utc_now(), -umur_detik, :second)
     Repo.update_all(from(b in Batch, where: b.id == ^batch.id), set: [{kolom, waktu}])
@@ -74,8 +71,6 @@ defmodule MapsScraper.Validation.RetentionTest do
     end
 
     test "membuang batch yang tidak pernah selesai setelah ambang jauh terlewat" do
-      # Jaring pengaman: pekerjanya hilang atau job-nya dibuang sebelum sempat
-      # menandai barisnya. Tanpa ini batch seperti itu mengendap selamanya.
       with_config([job_ttl_ms: :timer.hours(1), max_jobs: 0], fn ->
         {:ok, batch} = Validation.enqueue(%{"queries" => ["ok:A"]})
 
@@ -90,9 +85,7 @@ defmodule MapsScraper.Validation.RetentionTest do
       with_config([job_ttl_ms: 0, max_jobs: 2], fn ->
         for nama <- ["ok:A", "ok:B"], do: selesai!([nama])
 
-        # Tanpa headroom, dua batch masih muat.
         assert Retention.sweep() == 0
-        # Dengan headroom 1, satu harus dibuang agar ada ruang.
         assert Retention.sweep(headroom: 1) == 1
       end)
     end
@@ -109,10 +102,6 @@ defmodule MapsScraper.Validation.RetentionTest do
 
   describe "Cleaner" do
     test "menyapu dan tetap selesai walau vacuum tidak bisa dijalankan" do
-      # Di dalam test, seluruhnya berjalan pada satu transaksi sandbox — dan
-      # VACUUM memang tidak boleh berada di dalam transaksi. Justru itu yang
-      # membuat kasus ini berguna: kegagalan vacuum tidak boleh menggagalkan
-      # penyapuannya, karena datanya sudah terlanjur terhapus.
       with_config([job_ttl_ms: :timer.hours(1), max_jobs: 0], fn ->
         lama = selesai!(["ok:A"]) |> tuakan!(7200)
 

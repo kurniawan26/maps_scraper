@@ -72,7 +72,6 @@ defmodule MapsScraper.MapsTest do
       assert opts.country == "US"
 
       assert {:ok, %{lang: "pt-BR"}} = Maps.validate_options(%{"lang" => "pt-BR"})
-      # kosong dan tidak diisi sama-sama jatuh ke default
       assert {:ok, %{lang: "id", country: "ID"}} = Maps.validate_options(%{"lang" => "  "})
     end
 

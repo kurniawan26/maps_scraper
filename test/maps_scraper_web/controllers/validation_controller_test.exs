@@ -8,8 +8,6 @@ defmodule MapsScraperWeb.ValidationControllerTest do
     :ok
   end
 
-  # Job tidak lagi dijalankan pekerja yang berjalan sendiri selama test; antrean
-  # dijalankan di sini supaya waktunya deterministik, tanpa polling maupun sleep.
   defp await_done(conn, job_id) do
     drain()
 
@@ -101,7 +99,6 @@ defmodule MapsScraperWeb.ValidationControllerTest do
     test "melaporkan ringkasan antrean", %{conn: conn} do
       body = conn |> get(~p"/api/validations") |> json_response(200)
 
-      # Concurrency kini ditentukan ukuran antrean Oban, bukan state GenServer.
       assert body["concurrency"] == MapsScraper.Validation.concurrency()
       assert body["max_attempts"] == 3
       assert is_integer(body["pending"])

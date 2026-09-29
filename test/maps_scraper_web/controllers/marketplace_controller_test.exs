@@ -100,8 +100,6 @@ defmodule MapsScraperWeb.MarketplaceControllerTest do
     end
 
     test "verifikasi bot diteruskan sebagai 503, bukan 404", %{conn: conn} do
-      # Tokopedia memasang Bot Manager pada sebagian toko. "tidak terbaca" tidak
-      # boleh menjadi "toko tidak ada" — itu akan menghapus toko yang nyata.
       stub_error(503, %{
         "code" => "tokopedia_challenged",
         "message" => "Tokopedia meminta verifikasi bot"

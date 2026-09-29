@@ -41,8 +41,6 @@ defmodule MapsScraper.Validation.Row do
       %Row{status: "error", error: error} when is_map(error) ->
         Map.put(base, :error, atomize(error))
 
-      # Baris yang sedang menunggu giliran ulang membawa penyebab kegagalan
-      # terakhirnya, supaya yang memantau tahu kenapa batch belum selesai.
       %Row{error: error} when is_map(error) ->
         Map.put(base, :last_error, atomize(error))
 
@@ -51,8 +49,6 @@ defmodule MapsScraper.Validation.Row do
     end
   end
 
-  # Hasil disimpan sebagai JSON, jadi kuncinya kembali sebagai string. Dikembalikan
-  # ke atom di sini supaya bentuk response-nya persis sama dengan sebelumnya.
   defp atomize_result(result) do
     %{
       found: result["found"],

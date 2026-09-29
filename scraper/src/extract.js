@@ -1,10 +1,5 @@
-// Fungsi-fungsi di bawah ini dijalankan DI DALAM halaman (page.evaluate), jadi harus
-// berdiri sendiri: tidak boleh memakai import atau variabel dari luar.
-// Semuanya mengembalikan string mentah; normalisasi angka dilakukan di sisi Node.
 
 export function extractList() {
-  // Google memakai font ikon, sehingga glyph Private Use Area (mis. \ue934) ikut
-  // terbawa ke innerText dan menyamar sebagai segmen teks yang valid.
   const clean = (value) => {
     if (typeof value !== 'string') return null;
     const stripped = value.replace(/[\uE000-\uF8FF]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -39,14 +34,11 @@ export function extractList() {
     const name =
       pick(card, ['.qBF1Pd', '.fontHeadlineSmall']) || clean(anchor.getAttribute('aria-label'));
 
-    // Baris teks kartu dipakai sebagai cadangan kalau nama kelas Google berubah.
     const lines = (card.innerText || '')
       .split('\n')
       .map(clean)
       .filter(Boolean);
 
-    // Baris "Kategori · Alamat" harus dibedakan dari baris jam buka
-    // ("Buka · Tutup pukul 22.00") yang bentuknya mirip.
     const statusPattern = /^(buka|tutup|open|clos|permanently|sementara)/i;
     const detailLine =
       lines.find(
@@ -56,8 +48,6 @@ export function extractList() {
     let category = null;
     let address = null;
     if (detailLine) {
-      // Segmen kosong muncul kalau Google menyisipkan penanda tanpa teks
-      // (mis. tingkat harga), dan tanpa disaring akan menyisakan " · " di depan alamat.
       const parts = detailLine
         .split('·')
         .map((part) => part.trim())
@@ -108,8 +98,6 @@ export function extractPlace() {
     return null;
   };
 
-  // Tombol info memakai data-item-id yang stabil; isinya ada di aria-label
-  // dengan format "Alamat: Jl. ...". Prefix sebelum ": " dibuang.
   const fromItem = (selector) => {
     const node = document.querySelector(selector);
     if (!node) return null;
@@ -126,7 +114,6 @@ export function extractPlace() {
     'div.F7nice span[aria-label*="ulasan"], div.F7nice span[aria-label*="review"]'
   );
 
-  // Jam buka tersaji sebagai tabel hari/jam, tetap ada di DOM walau panelnya tertutup.
   const hourRows = Array.from(document.querySelectorAll('table tr'))
     .map((row) => {
       const cells = Array.from(row.querySelectorAll('td'));
@@ -160,15 +147,6 @@ export function extractPlace() {
   };
 }
 
-// Instagram merender profil dari JavaScript, jadi HTML mentahnya sama persis untuk
-// username yang ada maupun yang tidak — yang membedakan hanya isi DOM setelah
-// skrip jalan. Tiga keadaan yang mungkin, dan harus dibedakan dengan tegas:
-//
-//   og:title ada                    -> profil ada
-//   teks "Profile isn't available"  -> profil tidak ada
-//   dua-duanya tidak ada            -> Instagram menolak melayani kita
-//
-// Keadaan ketiga TIDAK BOLEH dibaca sebagai "tidak ada". Lihat instagram.js.
 export function extractProfile() {
   const clean = (value) => {
     if (typeof value !== 'string') return null;
@@ -184,9 +162,6 @@ export function extractProfile() {
   const body = document.body ? document.body.innerText : '';
   const header = document.querySelector('header');
 
-  // Jumlah pengikut yang eksak hanya ada di atribut title; teks di sebelahnya
-  // sudah dibulatkan Instagram ("268M followers"). Butir berikutnya — following
-  // dan postingan — tidak punya atribut itu.
   const items = header ? Array.from(header.querySelectorAll('ul li')) : [];
 
   const titleOf = (node) => {
@@ -195,9 +170,6 @@ export function extractProfile() {
     return holder ? clean(holder.getAttribute('title')) : null;
   };
 
-  // Tautan bio biasanya dibungkus Instagram lewat l.instagram.com, tapi tidak
-  // selalu. Cadangannya: tautan keluar pertama di header yang bukan milik Meta —
-  // penjagaan itu yang memisahkannya dari tautan Threads di sebelahnya.
   const externalLink = (root) => {
     if (!root) return null;
     const wrapped = root.querySelector('a[href*="l.instagram.com"]');
@@ -218,8 +190,6 @@ export function extractProfile() {
   return {
     og_title: meta('meta[property="og:title"]'),
     og_description: meta('meta[property="og:description"]'),
-    // og:url sudah berupa hasil akhir: kalau Instagram mengalihkan ke akun lain,
-    // yang tertulis di sini adalah akun tujuan, bukan yang kita minta.
     og_url: meta('meta[property="og:url"]') || meta('link[rel="canonical"]', 'href'),
     meta_description: meta('meta[name="description"]'),
     followers_exact: titleOf(items[0]),
@@ -235,9 +205,6 @@ export function extractProfile() {
   };
 }
 
-// Halaman web umum. Yang diambil hanya bahan untuk menjawab dua pertanyaan:
-// apakah halamannya hidup, dan apakah isinya cocok dengan nama yang dicari.
-// Bukan pengekstrak konten — tidak ada teks isi, tabel, maupun kontak di sini.
 export function extractPage() {
   const clean = (value) => {
     if (typeof value !== 'string') return null;
@@ -252,14 +219,11 @@ export function extractPage() {
 
   const body = document.body ? document.body.innerText : '';
 
-  // Host tujuan tiap tautan. Dipakai mengenali halaman parkir, yang isinya
-  // nyaris kosong tetapi selalu menautkan ke layanan penjual domain.
   const linkHosts = new Set();
   for (const anchor of document.querySelectorAll('a[href]')) {
     try {
       linkHosts.add(new URL(anchor.href, location.href).hostname.replace(/^www\./, ''));
     } catch {
-      // href yang tidak dapat diurai tidak memberi tahu apa-apa; lewati.
     }
   }
 
@@ -270,8 +234,6 @@ export function extractPage() {
       meta('meta[name="description"]') || meta('meta[property="og:description"]'),
     og_title: meta('meta[property="og:title"]'),
     canonical: meta('link[rel="canonical"]', 'href'),
-    // Panjangnya dibatasi: yang dibutuhkan hanya cukup untuk membedakan halaman
-    // berisi dari halaman kosong, bukan seluruh isinya.
     text_length: body.replace(/\s+/g, ' ').trim().length,
     text_sample: clean(body.slice(0, 600)),
     link_hosts: Array.from(linkHosts).slice(0, 40)

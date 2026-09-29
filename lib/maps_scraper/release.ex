@@ -42,9 +42,6 @@ defmodule MapsScraper.Release do
 
     now = DateTime.utc_now()
 
-    # Hanya `state` yang diubah. `attempted_at` dan `attempted_by` berstatus NOT
-    # NULL pada skema Oban, dan lagi pula akan ditimpa sendiri saat job berikutnya
-    # benar-benar dijalankan.
     {kembali, _} =
       repo.update_all(
         from(j in "oban_jobs", where: j.state == "executing" and j.attempt < j.max_attempts),

@@ -36,13 +36,6 @@ defmodule MapsScraper.Website do
   @query_max_length 512
   @name_max_length 200
 
-  # Bentuk nama host. Diperiksa di sini supaya masukan yang jelas-jelas bukan
-  # alamat tidak perlu menghabiskan satu context browser untuk dibuktikan.
-  #
-  # Host satu suku kata ("localhost", "intranet") sengaja ikut diterima:
-  # menolaknya sebagai "bukan domain" menyesatkan, padahal yang sebenarnya
-  # terjadi adalah ia menunjuk mesin di dalam jaringan. `ensure_public/1` yang
-  # menolaknya, dengan sebab yang tepat.
   @hostname ~r/^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i
 
   @doc """
@@ -140,10 +133,6 @@ defmodule MapsScraper.Website do
     end
   end
 
-  # ------------------------------------------------------------------
-  # Alamat yang tidak boleh dijangkau
-  # ------------------------------------------------------------------
-
   defp public_address?({0, _, _, _}), do: false
   defp public_address?({10, _, _, _}), do: false
   defp public_address?({127, _, _, _}), do: false
@@ -159,30 +148,19 @@ defmodule MapsScraper.Website do
   defp public_address?({a, _, _, _}) when a >= 224, do: false
   defp public_address?({_, _, _, _}), do: true
 
-  # IPv4 yang dipetakan ke IPv6 menembus pemeriksaan IPv6 kalau tidak
-  # dikembalikan dulu ke bentuk IPv4-nya.
   defp public_address?({0, 0, 0, 0, 0, 0xFFFF, ab, cd}) do
     public_address?({div(ab, 256), rem(ab, 256), div(cd, 256), rem(cd, 256)})
   end
 
   defp public_address?({0, 0, 0, 0, 0, 0, 0, 0}), do: false
   defp public_address?({0, 0, 0, 0, 0, 0, 0, 1}), do: false
-  # fc00::/7 unique local
   defp public_address?({a, _, _, _, _, _, _, _}) when Bitwise.band(a, 0xFE00) == 0xFC00, do: false
-  # fe80::/10 link-local
   defp public_address?({a, _, _, _, _, _, _, _}) when Bitwise.band(a, 0xFFC0) == 0xFE80, do: false
-  # ff00::/8 multicast
   defp public_address?({a, _, _, _, _, _, _, _}) when Bitwise.band(a, 0xFF00) == 0xFF00, do: false
   defp public_address?({_, _, _, _, _, _, _, _}), do: true
 
   defp public_address?(_), do: false
 
-  # ------------------------------------------------------------------
-  # Parameter
-  # ------------------------------------------------------------------
-
-  # Alamat IP telanjang lolos di sini dan disaring ensure_public/1 —
-  # pemeriksaannya sama untuk IP literal maupun hasil resolusi DNS.
   defp valid_host?(host) do
     Regex.match?(@hostname, host) or match?({:ok, _}, :inet.parse_address(to_charlist(host)))
   end

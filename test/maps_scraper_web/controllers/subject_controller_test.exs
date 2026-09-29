@@ -51,7 +51,6 @@ defmodule MapsScraperWeb.SubjectControllerTest do
     end
 
     test "kanal yang gagal tetap dijawab 200", %{conn: conn} do
-      # Satu kanal diblokir tidak boleh membuang kanal lain yang sudah terjawab.
       Req.Test.stub(Client, fn conn ->
         case conn.request_path do
           "/scrape/website" ->

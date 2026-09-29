@@ -3,8 +3,6 @@ defmodule MapsScraper.Repo.Migrations.CreateValidationTables do
 
   def change do
     create table(:validation_batches, primary_key: false) do
-      # Id dibuat aplikasi, bukan autoincrement: nilainya sudah menjadi bagian
-      # dari API publik (`job_id`) sejak sebelum ada database.
       add :id, :string, primary_key: true
       add :source, :string, null: false
       add :opts, :map, null: false, default: %{}
@@ -29,7 +27,6 @@ defmodule MapsScraper.Repo.Migrations.CreateValidationTables do
     end
 
     create unique_index(:validation_rows, [:batch_id, :index])
-    # Dipakai saat merangkum batch dan saat membuang batch lama.
     create index(:validation_rows, [:batch_id, :status])
     create index(:validation_batches, [:finished_at])
   end

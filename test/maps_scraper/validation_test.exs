@@ -1,5 +1,4 @@
 defmodule MapsScraper.ValidationTest do
-  # Beberapa test menimpa konfigurasi aplikasi, jadi tidak boleh paralel.
   use MapsScraper.DataCase, async: false
 
   alias MapsScraper.Validation
@@ -17,7 +16,6 @@ defmodule MapsScraper.ValidationTest do
     batch
   end
 
-  # Menjalankan antrean sampai kosong, lalu mengambil keadaan akhirnya.
   defp run!(batch) do
     drain()
     {:ok, done} = Validation.fetch(batch.id)
@@ -48,7 +46,6 @@ defmodule MapsScraper.ValidationTest do
 
       assert map.status == :done
       assert map.counts == %{pending: 0, running: 0, ok: 3, error: 0}
-      # notfound tidak dihitung cocok walaupun scraping-nya sendiri berhasil
       assert map.verdicts == %{match: 2, review: 0, no_match: 1}
 
       [first | _] = map.results
@@ -77,25 +74,18 @@ defmodule MapsScraper.ValidationTest do
 
   describe "ketahanan terhadap restart" do
     test "baris tersimpan di database, bukan di memori proses" do
-      # Inti pindah ke Oban: dulu seluruh batch hidup di state sebuah GenServer
-      # dan ikut hilang setiap aplikasi di-restart.
       batch = enqueue!(["ok:Monas", "ok:Plaza"])
 
       tersimpan = Repo.all(from(r in Row, where: r.batch_id == ^batch.id, order_by: r.index))
       assert Enum.map(tersimpan, & &1.query) == ["ok:Monas", "ok:Plaza"]
       assert Enum.all?(tersimpan, &(&1.status == "pending"))
 
-      # Job-nya pun tersimpan, bukan sekadar pesan yang melayang di antrean.
       assert Repo.aggregate(from(j in "oban_jobs", where: j.queue == "validation"), :count) >= 2
     end
   end
 
   describe "sidecar penuh" do
     test "busy tidak menghabiskan jatah percobaan" do
-      # Ini yang dulu merusak: dengan antrean lama, lima kali `busy` berturut-turut
-      # membuat baris yang datanya sehat divonis gagal setelah percobaan ketiga.
-      # Oban mengembalikan hitungan percobaan saat job di-snooze, jadi kemacetan
-      # yang kita timbulkan sendiri tidak lagi menghapus data yang valid.
       done = enqueue!(["busy:5:Monas"]) |> run!()
 
       [result] = results(done)
@@ -223,8 +213,6 @@ defmodule MapsScraper.ValidationTest do
     end
 
     test "context yang meledak tidak meninggalkan baris menggantung" do
-      # Tanpa penangkapan di worker, barisnya tetap berstatus "running" selamanya
-      # dan batch-nya tidak pernah ditutup.
       done = enqueue!(["crash", "ok:Monas"]) |> run!()
 
       hasil = Map.new(results(done), &{&1.query, &1})
@@ -321,7 +309,6 @@ defmodule MapsScraper.ValidationTest do
     end
 
     test "baris marketplace tanpa host ditolak di depan" do
-      # "samsung" ada di kedua platform sebagai toko yang berbeda.
       assert {:error, {:invalid, "queries", _}} =
                Validation.enqueue(%{"queries" => ["samsung"], "source" => "marketplace"})
 
@@ -437,8 +424,6 @@ defmodule MapsScraper.ValidationTest do
         run!(lama)
         Process.sleep(20)
 
-        # Pembersihan terjadi saat batch baru masuk, bukan lewat timer yang ikut
-        # hilang saat restart.
         enqueue!(["ok:B"])
         assert Validation.fetch(lama.id) == :error
       end)

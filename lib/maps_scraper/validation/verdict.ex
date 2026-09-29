@@ -68,8 +68,6 @@ defmodule MapsScraper.Validation.Verdict do
     end
   end
 
-  # Vonis bernilai tiga arah, bukan dua, karena keputusan akhir yang butuh
-  # pertimbangan sebaiknya diambil di luar service ini.
   defp verdict(_found, _best_match, [], _settings), do: :no_match
   defp verdict(found, _best_match, _candidates, _settings) when found != true, do: :no_match
   defp verdict(_found, nil, _candidates, _settings), do: :review
@@ -85,9 +83,6 @@ defmodule MapsScraper.Validation.Verdict do
 
   defp verdict(_found, _best_match, _candidates, _settings), do: :review
 
-  # Skor tinggi menjawab "ada yang cocok", bukan "yang mana". Ketika dua kandidat
-  # teratas berimpit, pertanyaan kedua belum terjawab — dan justru itu yang perlu
-  # dikirim ke penilai di luar.
   defp ambiguous?([%{"match" => first}, %{"match" => second} | _], settings)
        when is_number(first) and is_number(second) do
     first - second <= settings[:ambiguity_margin]
@@ -95,10 +90,6 @@ defmodule MapsScraper.Validation.Verdict do
 
   defp ambiguous?(_candidates, _settings), do: false
 
-  # Kandidat dipangkas ke kolom yang dibutuhkan penilai di luar service ini.
-  # Bentuknya berbeda per sumber: identitas stabil sebuah tempat adalah
-  # place_id/cid/ftid, sebuah akun Instagram atau TikTok cukup username-nya, dan sebuah
-  # halaman web adalah URL-nya.
   defp candidate(store, "marketplace") do
     Map.take(store, ~w(platform slug store_name store_url shop_id followers items rating match))
   end

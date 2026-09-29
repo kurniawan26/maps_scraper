@@ -10,8 +10,6 @@ defmodule MapsScraper.TikTok.Client do
 
   @scrape_path "/scrape/tiktok"
 
-  # Satu halaman, satu pembacaan — sama dengan Instagram. Kelonggarannya supaya
-  # pesan error sidecar sempat sampai sebelum koneksi diputus.
   @slack_ms 15_000
 
   def scrape(query, opts \\ %{}) do

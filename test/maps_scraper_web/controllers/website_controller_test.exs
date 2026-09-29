@@ -3,9 +3,6 @@ defmodule MapsScraperWeb.WebsiteControllerTest do
 
   alias MapsScraper.Scraper.Client
 
-  # Host berupa alamat IP publik dipakai di sepanjang test ini supaya
-  # pemeriksaan alamat tidak perlu menyentuh DNS: hasilnya sama di mesin mana
-  # pun dan tidak ada permintaan jaringan yang diam-diam ikut berjalan.
   @host "8.8.8.8"
 
   defp stub_success(payload) do
@@ -100,9 +97,6 @@ defmodule MapsScraperWeb.WebsiteControllerTest do
     end
 
     test "server yang memblokir kita diteruskan sebagai 503, bukan found: false", %{conn: conn} do
-      # 403 dari situs tujuan berarti halamannya ada tetapi kita tidak boleh
-      # melihatnya. Memvonisnya mati akan menghapus website yang sebenarnya
-      # hidup dan hanya menolak bot.
       stub_error(503, %{"code" => "website_http_403", "message" => "Server menjawab 403"})
 
       body = conn |> get(~p"/api/website", query: @host) |> json_response(503)
@@ -121,7 +115,6 @@ defmodule MapsScraperWeb.WebsiteControllerTest do
         |> post(~p"/api/website", %{query: @host, name: "Bengkel Motor Jaya"})
         |> json_response(200)
 
-      # Halamannya hidup, tapi isinya bukan usaha yang dicari.
       assert body["found"] == true
       assert body["best_match"] == 0
     end

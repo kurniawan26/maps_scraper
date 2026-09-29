@@ -24,11 +24,6 @@ const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
 const MAX_BODY_BYTES = 64 * 1024;
 
-// Satu /scrape memakai minimal satu context browser, dan dengan detail=true
-// beberapa sekaligus. Tanpa batas, permintaan yang datang bersamaan bisa
-// menghabiskan memori container. Yang kelebihan ditolak 503 supaya pemanggil
-// mengulang lewat backoff-nya, bukan menunggu di antrean yang tak terlihat.
-// Isi 0 untuk mematikan pembatasan.
 const MAX_CONCURRENT_SCRAPES = toInt(process.env.MAX_CONCURRENT_SCRAPES, 4);
 const SHUTDOWN_GRACE_MS = toInt(process.env.SHUTDOWN_GRACE_MS, 10_000);
 
@@ -86,9 +81,6 @@ function buildOptions(payload) {
   };
 }
 
-// Instagram defaultnya en/US, bukan id/ID seperti Maps: seluruh penanda yang
-// dibaca instagram.js — "Followers", "Profile isn't available", label "Verified"
-// — ikut berubah mengikuti bahasa. Mengunci bahasanya membuat parsing pasti.
 function buildInstagramOptions(payload) {
   return {
     lang: typeof payload.lang === 'string' ? payload.lang : 'en',
@@ -98,9 +90,6 @@ function buildInstagramOptions(payload) {
   };
 }
 
-// Sumber "website" membuka URL yang ditentukan pemanggil, jadi bahasanya
-// mengikuti Maps (id/ID) — bukan dikunci en/US seperti Instagram, yang penanda
-// halamannya memang perlu dipastikan.
 function buildWebsiteOptions(payload) {
   return {
     lang: typeof payload.lang === 'string' ? payload.lang : 'id',
@@ -110,8 +99,6 @@ function buildWebsiteOptions(payload) {
   };
 }
 
-// Satu permintaan memakai minimal satu context browser. Slot dihitung di satu
-// tempat supaya tiap endpoint baru ikut terbatasi tanpa menyalin penjagaannya.
 async function withSlot(handler) {
   if (MAX_CONCURRENT_SCRAPES > 0 && inFlight >= MAX_CONCURRENT_SCRAPES) {
     throw new ScrapeError(`Sidecar sedang menangani ${inFlight} permintaan`, {
@@ -167,9 +154,6 @@ async function handleInstagram(req, res) {
   sendJson(res, 200, result);
 }
 
-// TikTok dibaca dari JSON yang tertanam di halaman, bukan dari teks yang
-// berubah mengikuti bahasa — tetapi opsinya disamakan dengan Instagram (en/US)
-// supaya kedua sumber sosial berperilaku sama.
 async function handleTiktok(req, res) {
   const { payload, query } = await readQuery(req);
   const username = tiktokUsername(query);
@@ -200,8 +184,6 @@ async function handleMarketplace(req, res) {
 
   const options = { ...buildWebsiteOptions(payload), query };
 
-  // Tokopedia dibaca lewat HTTP polos tanpa context browser sama sekali, jadi
-  // tidak perlu memakai slot — yang dijaga slot adalah memori Chromium.
   const result =
     store.platform === 'tokopedia'
       ? await scrapeMarketplace(store, options)
@@ -224,8 +206,6 @@ async function handleWebsite(req, res) {
   const options = {
     ...buildWebsiteOptions(payload),
     query,
-    // Domain telanjang dinaikkan ke https; kalau gagal, boleh dicoba http.
-    // URL yang skemanya ditulis pemanggil dihormati apa adanya.
     httpFallback: !/^[a-z][a-z0-9+.-]*:\/\//i.test(query.trim())
   };
 
@@ -272,7 +252,6 @@ const server = http.createServer(async (req, res) => {
     const status = error instanceof ScrapeError ? error.status : 500;
     const code = error instanceof ScrapeError ? error.code : 'internal_error';
 
-    // 503 karena penuh adalah keadaan normal di bawah beban, bukan kerusakan.
     if (status >= 500 && code !== 'busy') console.error('[scraper]', error);
     if (res.headersSent) return res.end();
 
@@ -282,7 +261,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-// Scraping bisa lama; jangan diputus lebih cepat dari timeout Playwright.
 server.requestTimeout = 180000;
 server.headersTimeout = 185000;
 
@@ -292,10 +270,6 @@ server.listen(PORT, HOST, () => {
 
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.on(signal, () => {
-    // server.close() menunggu seluruh koneksi selesai. Koneksi keep-alive dari
-    // pemanggil bisa menahannya sampai Docker mengirim SIGKILL, dan closeBrowser()
-    // tidak pernah sempat jalan. Batas waktu di bawah ini memastikan proses tetap
-    // berhenti dengan browser yang sudah ditutup.
     const forced = setTimeout(() => {
       console.warn(`[scraper] berhenti paksa setelah ${SHUTDOWN_GRACE_MS} ms`);
       closeBrowser().finally(() => process.exit(1));

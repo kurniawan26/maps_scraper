@@ -16,17 +16,8 @@ import {
 
 const DETAIL_CONCURRENCY = Number(process.env.DETAIL_CONCURRENCY || 3);
 
-// Dengan detail=true, lama satu permintaan tumbuh mengikuti jumlah hasil: tiap
-// tempat dibuka sendiri, DETAIL_CONCURRENCY sekaligus. Untuk limit besar itu
-// melewati batas waktu pemanggil, yang lalu memutus koneksi sementara sidecar
-// tetap bekerja sia-sia. Anggaran di bawah ini membatasi seluruh fase detail;
-// tempat yang tidak kebagian waktu dikembalikan dengan kolom kartunya saja.
-//
-// Nilainya dipakai MapsScraper.Maps.Client untuk menghitung batas waktu HTTP-nya,
-// jadi harus sejalan dengan :detail_budget_ms di config Elixir.
 const DETAIL_BUDGET_MS = Number(process.env.DETAIL_BUDGET_MS || 60_000);
 
-// Di bawah ini membuka halaman baru hanya akan berujung timeout.
 const DETAIL_MIN_SLICE_MS = 2_000;
 
 function normalizeListItem(item) {
@@ -72,18 +63,12 @@ async function readPlace(page, url, { timeout }) {
 }
 
 async function readLoadedPlace(page, { timeout }) {
-  // Judul tempat kerap berstatus hidden walau isinya sudah ada, jadi yang ditunggu
-  // adalah teksnya terisi — bukan elemennya terlihat. Batas waktunya dipendekkan
-  // supaya URL yang memang tidak menunjuk tempat gagal cepat, bukan setelah 45 detik.
   await page
     .waitForFunction(
       () => {
         const heading = document.querySelector('h1');
         if (heading && heading.textContent.trim()) return true;
 
-        // Google mengosongkan segmen nama pada URL saat tidak ada tempat di baliknya,
-        // mis. "/maps/place//@...". Mengenalinya membuat jalur cadangan tidak
-        // perlu menunggu sampai batas waktu penuh.
         return location.pathname.includes('/maps/place//');
       },
       null,
@@ -91,8 +76,6 @@ async function readLoadedPlace(page, { timeout }) {
     )
     .catch(() => {});
 
-  // Judul muncul lebih dulu daripada blok rating dan daftar info, jadi tunggu sebentar
-  // sampai salah satunya terisi. Tempat tanpa ulasan tidak boleh ikut tertahan di sini.
   await page
     .waitForFunction(
       () =>
@@ -105,7 +88,6 @@ async function readLoadedPlace(page, { timeout }) {
     )
     .catch(() => {});
 
-  // URL diperbarui Google setelah halaman siap; koordinat baru muncul di situ.
   await page.waitForFunction(() => /!3d-?\d/.test(location.href), null, { timeout: 5000 }).catch(() => {});
 
   const raw = await extractWhenStable(page, extractPlace);
@@ -126,10 +108,6 @@ export async function scrapePlace(url, options = {}) {
     return await withPage({ lang, country, timeout }, async (page) => {
       const place = await readPlace(page, withLang(url, { lang, country }), { timeout });
 
-      // URL menunjuk satu tempat secara pasti, jadi kemiripan teks terhadap
-      // URL-nya sendiri tidak berarti apa-apa. Tetapi kalau pemanggil menyebut
-      // nama yang diharapkan, itu bisa dibandingkan dengan tempat yang ketemu —
-      // dan itulah yang menjawab "linknya benar milik usaha ini atau bukan".
       const match = name ? matchScore(name, place) : null;
 
       return {
@@ -144,15 +122,12 @@ export async function scrapePlace(url, options = {}) {
   } catch (error) {
     if (!(error instanceof ScrapeError) || error.code !== 'place_not_found') throw error;
 
-    // URL yang disalin dari bilah alamat sering kehilangan segmen `data=` sehingga
-    // Google hanya membuka peta kosong. Nama tempat di URL masih bisa dicari.
     const fallbackQuery = queryFromMapsUrl(url);
     if (fallbackQuery) {
       const result = await scrapeSearch(fallbackQuery, options);
       return { ...result, query: url, resolved_from_url: fallbackQuery };
     }
 
-    // Tidak ada tempat di balik URL itu — jawaban yang sah, bukan kegagalan.
     return { type: 'place', query: url, found: false, best_match: null, count: 0, results: [] };
   }
 }
@@ -161,9 +136,6 @@ export async function scrapeSearch(query, options = {}) {
   const { lang = 'id', country = 'ID', timeout = 45000, detail = false, name = null } = options;
   const limit = clampInt(options.limit, { min: 1, max: 100, fallback: 20 });
 
-  // Kalau pemanggil menyebut nama yang diharapkan, itu yang dipakai menilai —
-  // bukan query pencariannya. Keduanya bisa berbeda: query boleh berupa alamat,
-  // sedangkan yang ingin dipastikan adalah nama usahanya.
   const scoreAgainst = name || query;
 
   return withPage({ lang, country, timeout }, async (page) => {
@@ -174,14 +146,10 @@ export async function scrapeSearch(query, options = {}) {
 
     const state = await waitForSearchState(page, timeout);
 
-    // Google menyatakan sendiri kalau tidak menemukan apa pun. Mengenalinya membuat
-    // query yang memang tidak ada dijawab dalam hitungan detik, bukan menunggu timeout.
     if (state === 'empty') {
       return { type: 'search', query, found: false, best_match: 0, count: 0, results: [] };
     }
 
-    // Pencarian dengan satu kecocokan kuat langsung menampilkan panel tempat, tanpa feed.
-    // URL baru ditulis ulang Google beberapa detik kemudian, jadi yang dipercaya adalah DOM.
     if (state !== 'feed') {
       const place = await readLoadedPlace(page, { timeout }).catch(() => null);
       if (!place) {
@@ -231,9 +199,6 @@ export async function scrapeSearch(query, options = {}) {
   });
 }
 
-// Menunggu halaman pencarian menyatakan dirinya: daftar hasil, satu panel tempat,
-// atau pernyataan tidak ada hasil. Mengembalikan null berarti "belum jelas" sehingga
-// Playwright terus menjajaki sampai batas waktu.
 async function waitForSearchState(page, timeout) {
   const handle = await page
     .waitForFunction(
@@ -258,8 +223,6 @@ async function waitForSearchState(page, timeout) {
   return handle ? handle.jsonValue() : null;
 }
 
-// Feed Google memuat hasil secara bertahap, jadi harus di-scroll sampai
-// cukup atau sampai daftarnya habis.
 async function collectFeed(page, limit) {
   let items = await page.evaluate(extractList);
   let previousCount = items.length;
@@ -283,17 +246,13 @@ async function collectFeed(page, limit) {
     }
   }
 
-  // Jumlah kartu sudah pasti, tetapi isi tiap kartu masih bisa menyusul.
   return extractWhenStable(page, extractList);
 }
 
-// Kartu hasil hanya memuat sebagian kolom; detail lengkap butuh membuka tiap halaman.
 async function enrichWithDetail(results, { lang, country, timeout, deadline }) {
   return mapWithConcurrency(results, DETAIL_CONCURRENCY, async (item) => {
     const remaining = deadline - Date.now();
 
-    // Anggaran habis: sisa tempat dikembalikan apa adanya. Kolom dari kartu
-    // hasil tetap terisi, hanya kolom yang butuh membuka halaman yang kosong.
     if (remaining < DETAIL_MIN_SLICE_MS) return { ...item, detail_skipped: true };
 
     const slice = Math.min(timeout, remaining);
@@ -304,7 +263,6 @@ async function enrichWithDetail(results, { lang, country, timeout, deadline }) {
       );
       return { ...item, ...detailed };
     } catch {
-      // Satu tempat yang gagal tidak boleh menggagalkan seluruh pencarian.
       return { ...item, detail_error: true };
     }
   });

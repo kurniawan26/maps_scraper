@@ -32,9 +32,6 @@ defmodule MapsScraper.Validation.Retention do
   @default_ttl_ms :timer.hours(24)
   @default_max_jobs 1_000
 
-  # Jaring pengaman untuk batch yang tidak pernah selesai — pekerjanya hilang,
-  # atau job-nya dibuang Oban sebelum sempat menandai barisnya. Tanpa ini,
-  # batch seperti itu tidak pernah memenuhi syarat penghapusan mana pun.
   @abandoned_multiplier 7
 
   @doc """
@@ -78,8 +75,6 @@ defmodule MapsScraper.Validation.Retention do
     end
   end
 
-  # ------------------------------------------------------------------
-
   defp delete_expired(ttl_ms) when ttl_ms > 0 do
     cutoff = DateTime.add(DateTime.utc_now(), -ttl_ms, :millisecond)
 
@@ -108,9 +103,6 @@ defmodule MapsScraper.Validation.Retention do
 
   defp delete_abandoned(_ttl_ms), do: 0
 
-  # Batas keras untuk deret batch yang datang lebih cepat daripada TTL-nya lewat.
-  # Yang dibuang selalu batch selesai yang paling tua; batch yang masih berjalan
-  # tidak pernah dikorbankan.
   defp enforce_cap(max_jobs, headroom) when max_jobs > 0 do
     excess = Repo.aggregate(Batch, :count) - max_jobs + headroom
 

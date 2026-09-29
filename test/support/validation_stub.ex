@@ -62,10 +62,6 @@ defmodule MapsScraper.ValidationStub do
     end
   end
 
-  # Host memakai TLD .invalid, yang menurut RFC 6761 tidak pernah diresolusi.
-  # Itu membuat pemeriksaan alamat di MapsScraper.Website melewatkannya tanpa
-  # menyentuh DNS sungguhan, dan hasilnya sama di mesin mana pun.
-  # Query marketplace wajib menyebut host, jadi prefiksnya ada pada slug toko.
   defp marketplace("https://www.tokopedia.com/ok" <> slug) do
     {:ok, store_payload("tokopedia", "ok#{slug}", found: true, best_match: 1)}
   end
@@ -149,9 +145,6 @@ defmodule MapsScraper.ValidationStub do
     }
   end
 
-  # Bentuk payload Instagram berbeda dari Maps — kandidatnya akun, bukan tempat.
-  # Query kontrol seperti "timeout" dan "crash" diteruskan ke jalur Maps supaya
-  # tidak perlu ditulis dua kali.
   defp instagram("ok." <> username) do
     {:ok, profile_payload(username, found: true, best_match: 1)}
   end
@@ -261,8 +254,6 @@ defmodule MapsScraper.ValidationStub do
   @doc "Berapa kali sebuah query sudah dipanggil."
   def attempts(query), do: :ets.update_counter(@table, query, {2, 0}, {query, 0})
 
-  # Sidecar penuh `n` kali, lalu berhasil. Dipakai membuktikan bahwa kemacetan
-  # yang kita timbulkan sendiri tidak menghabiskan jatah retry.
   defp busy(query, rest) do
     [threshold, name] = String.split(rest, ":", parts: 2)
     count = :ets.update_counter(@table, query, {2, 1}, {query, 0})
@@ -297,8 +288,6 @@ defmodule MapsScraper.ValidationStub do
     }
   end
 
-  # Tiga hasil dengan yang paling cocok di posisi terakhir — meniru Google yang
-  # meranking tempat lain lebih dulu.
   defp multi_payload(name) do
     %{
       "type" => "search",
@@ -310,8 +299,6 @@ defmodule MapsScraper.ValidationStub do
     }
   end
 
-  # Dua kandidat berbeda yang sama-sama berskor penuh — persis yang terjadi pada
-  # detail=true ketika beberapa tempat berbagi kecamatan dan kota yang sama.
   defp ambiguous_payload(name) do
     %{
       "type" => "search",

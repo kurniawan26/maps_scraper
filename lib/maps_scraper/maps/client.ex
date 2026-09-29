@@ -21,8 +21,6 @@ defmodule MapsScraper.Maps.Client do
   def scrape(query, opts \\ %{}) do
     page_timeout = Map.get(opts, :timeout, config(:timeout))
 
-    # Timeout dikirim eksplisit, bukan dibiarkan sidecar memakai bawaannya —
-    # kalau tidak, kedua sisi memegang angka sendiri-sendiri.
     body = Map.merge(opts, %{query: query, timeout: page_timeout})
 
     Client.post(@scrape_path, body, receive_timeout(opts, page_timeout))
@@ -30,14 +28,6 @@ defmodule MapsScraper.Maps.Client do
 
   defdelegate health, to: Client
 
-  # Timeout HTTP harus lebih longgar dari yang dipakai browser, kalau tidak
-  # koneksi putus duluan dan pesan error aslinya hilang.
-  #
-  # `timeout` di sidecar berlaku per halaman, bukan per permintaan. Dengan
-  # `detail: true` sidecar membuka tiap hasil satu per satu, jadi lamanya
-  # bertambah sebesar anggaran fase detail — angka yang sama dengan
-  # DETAIL_BUDGET_MS di sidecar. Tanpa memperhitungkannya, permintaan detail
-  # selalu diputus dari sisi sini padahal sidecar masih bekerja.
   defp receive_timeout(opts, page_timeout) do
     detail_budget =
       if Map.get(opts, :detail, false), do: config(:detail_budget_ms, 60_000), else: 0
