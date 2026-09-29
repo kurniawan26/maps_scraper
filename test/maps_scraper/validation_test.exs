@@ -257,6 +257,24 @@ defmodule MapsScraper.ValidationTest do
       refute Map.has_key?(hd(result.candidates), :place_id)
     end
 
+    test "batch tiktok dirangkum sebagai akun" do
+      done = enqueue!(["ok.dicoding"], %{"source" => "tiktok"}) |> run!()
+      [result] = results(done)
+
+      assert result.verdict == :match
+      assert [%{username: "dicoding", videos: 1361}] = result.candidates
+      refute Map.has_key?(hd(result.candidates), :place_id)
+    end
+
+    test "WAF TikTok diulang, bukan divonis akun tidak ada" do
+      done = enqueue!(["blocked"], %{"source" => "tiktok"}) |> run!()
+      [result] = results(done)
+
+      assert result.status == :error
+      assert result.attempts == 3
+      assert result.error.code == "tiktok_blocked"
+    end
+
     test "batch website dirangkum sebagai halaman" do
       done = enqueue!(["https://ok.contoh.invalid/"], %{"source" => "website"}) |> run!()
       [result] = results(done)
@@ -353,7 +371,7 @@ defmodule MapsScraper.ValidationTest do
 
     test "sumber yang tidak dikenal ditolak" do
       assert {:error, {:invalid, "source", _}} =
-               Validation.enqueue(%{"queries" => ["ok:A"], "source" => "tiktok"})
+               Validation.enqueue(%{"queries" => ["ok:A"], "source" => "facebook"})
     end
 
     test "baris yang bukan akun Instagram ditolak di depan" do
@@ -361,6 +379,14 @@ defmodule MapsScraper.ValidationTest do
                Validation.enqueue(%{
                  "queries" => ["https://www.instagram.com/p/ABC/"],
                  "source" => "instagram"
+               })
+    end
+
+    test "baris yang bukan akun TikTok ditolak di depan" do
+      assert {:error, {:invalid, "queries", _}} =
+               Validation.enqueue(%{
+                 "queries" => ["https://vt.tiktok.com/ZSabc/"],
+                 "source" => "tiktok"
                })
     end
 

@@ -258,6 +258,57 @@ export function instagramUsername(value) {
   return INSTAGRAM_USERNAME.test(bare) ? bare.toLowerCase() : null;
 }
 
+// --- TikTok ----------------------------------------------------------------
+
+// Hanya host yang memuat profil. vm.tiktok.com dan vt.tiktok.com sengaja tidak
+// ada di sini: tautan pendek itu menunjuk video, dan akun pemiliknya baru
+// ketahuan setelah pengalihannya diikuti.
+const TIKTOK_HOSTS = ['tiktok.com', 'm.tiktok.com'];
+
+// Aturan resmi TikTok: huruf, angka, titik, garis bawah, 2–24 karakter. Batas
+// panjangnya dilonggarkan: handle yang kepanjangan cukup dijawab "tidak ada"
+// oleh TikTok sendiri, sedangkan menolak handle lama yang ternyata sah
+// membuang barisnya tanpa pernah diperiksa.
+const TIKTOK_USERNAME = /^[a-z0-9._]{1,30}$/i;
+
+// Menerima "dicoding", "@dicoding", atau URL profil maupun video
+// ("tiktok.com/@dicoding/video/123" — akunnya tetap @dicoding), dan
+// mengembalikan username huruf kecil — atau null kalau bukan salah satunya.
+export function tiktokUsername(value) {
+  if (typeof value !== 'string') return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.includes('/')) {
+    const absolute = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+    let url;
+    try {
+      url = new URL(absolute);
+    } catch {
+      return null;
+    }
+
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+
+    const host = url.hostname.replace(/^www\./, '').toLowerCase();
+    if (!TIKTOK_HOSTS.includes(host)) return null;
+
+    // Berbeda dari Instagram, jalur profil TikTok selalu diawali "@". Itu
+    // sekaligus memisahkannya dari /explore, /tag, /music, dan sebagainya —
+    // tidak perlu daftar jalur cadangan.
+    const [first] = url.pathname.split('/').filter(Boolean);
+    if (!first || !first.startsWith('@')) return null;
+
+    const username = first.slice(1);
+    return TIKTOK_USERNAME.test(username) ? username.toLowerCase() : null;
+  }
+
+  const bare = trimmed.replace(/^@/, '');
+  return TIKTOK_USERNAME.test(bare) ? bare.toLowerCase() : null;
+}
+
 // Angka sosial datang dalam dua bentuk: lengkap dengan pemisah ribuan
 // ("268.554.117", dari atribut title) atau sudah dibulatkan dengan akhiran
 // ("269M", "32K", dari og:description). toCount/1 hanya menangani bentuk pertama

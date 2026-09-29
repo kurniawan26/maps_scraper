@@ -38,6 +38,10 @@ config :maps_scraper, :instagram,
   provider: MapsScraper.Instagram.Provider.Playwright,
   timeout: 45_000
 
+# TikTok sama dengan Instagram: satu halaman, satu pembacaan. Batas waktunya
+# menampung tantangan WAF yang harus selesai sebelum profil dimuat.
+config :maps_scraper, :tiktok, timeout: 45_000
+
 # Sumber "website" membuka URL dari pemanggil, jadi batas waktunya harus
 # menampung situs lambat tanpa menahan antrean terlalu lama.
 config :maps_scraper, :website, timeout: 45_000

@@ -1,7 +1,7 @@
 # MapsScraper
 
 JSON API untuk memverifikasi keberadaan sebuah data — tempat di Google Maps,
-akun di Instagram, halaman di web, toko di marketplace — dari input yang
+akun di Instagram atau TikTok, halaman di web, toko di marketplace — dari input yang
 bervariasi.
 
 Aplikasi ini **hanya menyajikan JSON API**: tanpa frontend, email, maupun
@@ -20,6 +20,7 @@ membuka halamannya, dan jawabannya selalu berbentuk `found` + `best_match`.
 ```
 klien  ->  Phoenix /api/places     ->  sidecar :3000 (Playwright)  ->  Google Maps
 klien  ->  Phoenix /api/instagram  ->  sidecar :3000 (Playwright)  ->  Instagram
+klien  ->  Phoenix /api/tiktok     ->  sidecar :3000 (Playwright)  ->  TikTok
 klien  ->  Phoenix /api/website    ->  sidecar :3000 (Playwright)  ->  situs mana pun
 klien  ->  Phoenix /api/marketplace ->  sidecar :3000               ->  Tokopedia / Shopee
 ```
@@ -28,10 +29,11 @@ klien  ->  Phoenix /api/marketplace ->  sidecar :3000               ->  Tokopedi
 | ------ | -------- | ----------------------- |
 | Google Maps | `/api/places` | Apakah tempat ini benar-benar ada? |
 | Instagram | `/api/instagram` | Apakah akun ini ada, dan apakah milik usaha yang dimaksud? |
+| TikTok | `/api/tiktok` | Sama dengan Instagram, untuk akun TikTok |
 | Website | `/api/website` | Apakah halaman ini hidup, dan apakah isinya cocok dengan usaha itu? |
 | Marketplace | `/api/marketplace` | Apakah toko ini ada di Tokopedia/Shopee, dan apakah miliknya? |
 
-Keempatnya bisa dipanggil satu per satu, **sekaligus lewat satu pintu**
+Kelimanya bisa dipanggil satu per satu, **sekaligus lewat satu pintu**
 (`POST /api/validate` — lihat [Satu pintu](#satu-pintu-post-apivalidate)), atau
 sebagai batch lewat `/api/validations`.
 
@@ -62,6 +64,8 @@ Seluruh variabel beserta penjelasannya ada di `.env.example`.
 | `POST` | `/api/places` | Verifikasi tempat lewat body JSON |
 | `GET`  | `/api/instagram?query=...` | Verifikasi akun Instagram lewat query string |
 | `POST` | `/api/instagram` | Verifikasi akun Instagram lewat body JSON |
+| `GET`  | `/api/tiktok?query=...` | Verifikasi akun TikTok lewat query string |
+| `POST` | `/api/tiktok` | Verifikasi akun TikTok lewat body JSON |
 | `GET`  | `/api/website?query=...` | Verifikasi halaman web lewat query string |
 | `POST` | `/api/website` | Verifikasi halaman web lewat body JSON |
 | `GET`  | `/api/marketplace?query=...` | Verifikasi toko marketplace lewat query string |
@@ -85,6 +89,7 @@ curl -X POST http://localhost:4000/api/validate \
     "name": "Warung Sate Pak Budi",
     "google_maps_url": "https://maps.app.goo.gl/xxxx",
     "instagram_url": "instagram.com/warungsatepakbudi",
+    "tiktok_url": "tiktok.com/@warungsatepakbudi",
     "website_url": "warungsate.com",
     "tokopedia_url": "tokopedia.com/warungsatepakbudi",
     "shopee_url": "shopee.co.id/warungsatepakbudi"
@@ -99,6 +104,7 @@ fieldnya.
 | `name` | Nama usaha. **Ini yang membuat jawabannya berarti** — lihat di bawah |
 | `google_maps_url` | URL Google Maps. Menerima nama tempat, alamat, atau koordinat juga |
 | `instagram_url` | URL profil atau username saja |
+| `tiktok_url` | URL profil TikTok (`tiktok.com/@...`) atau username saja |
 | `website_url` | URL atau nama domain |
 | `tokopedia_url` / `shopee_url` | URL toko. Platformnya diperiksa cocok dengan nama fieldnya |
 | `lang` / `country` | Diteruskan ke tiap kanal |
@@ -416,6 +422,85 @@ yang dibutuhkan adalah proxy residensial di depan sidecar — bukan perubahan ko
 Penyedia data dapat ditukar tanpa menyentuh context, antrean, maupun controller;
 lihat `MapsScraper.Instagram.Provider`.
 
+### TikTok `/api/tiktok`
+
+Memastikan apakah sebuah akun TikTok ada. Mekanismenya sama dengan
+[Instagram](#instagram-apiinstagram): tanpa login, satu query menunjuk tepat satu
+akun, dan jalurnya lewat sidecar Playwright. Parameternya pun sama — `query`,
+`name`, `lang` (default `en`), `country` (default `US`).
+
+Kenapa tetap butuh browser: TikTok memasang WAF di depan seluruh halamannya.
+`curl` ke `tiktok.com/@<username>` dijawab `200` berisi tantangan JavaScript
+("Please wait...") — untuk akun yang ada maupun yang tidak. Setelah tantangan itu
+selesai di browser, data profilnya sudah tertanam sebagai JSON lengkap dengan
+kode status, jadi pembacaannya justru lebih pasti daripada Instagram: tidak
+bergantung pada teks yang berubah mengikuti bahasa.
+
+`query` menerima username (`dicoding`, `@dicoding`), URL profil
+(`tiktok.com/@dicoding`), maupun URL video (`tiktok.com/@dicoding/video/123` —
+yang diperiksa akun pemiliknya). **Tautan pendek `vt.tiktok.com`/`vm.tiktok.com`
+ditolak `422`**: tautan itu menunjuk video, dan akunnya baru ketahuan setelah
+pengalihannya diikuti.
+
+```bash
+curl "http://localhost:4000/api/tiktok?query=dicoding"
+
+curl -X POST http://localhost:4000/api/tiktok \
+  -H "content-type: application/json" \
+  -d '{"query": "tiktok.com/@dicoding", "name": "Dicoding Indonesia"}'
+```
+
+```json
+{
+  "type": "profile",
+  "input_type": "url",
+  "query": "tiktok.com/@dicoding",
+  "found": true,
+  "best_match": 1,
+  "count": 1,
+  "results": [
+    {
+      "username": "dicoding",
+      "full_name": "Dicoding Indonesia",
+      "bio": "Indonesia’s top technology education provider🏆",
+      "external_url": "dicoding.com",
+      "verified": false,
+      "private": false,
+      "followers": 129700,
+      "following": 1,
+      "videos": 1361,
+      "likes": 3400000,
+      "profile_url": "https://www.tiktok.com/@dicoding",
+      "match": 1
+    }
+  ]
+}
+```
+
+`best_match` diartikan sama dengan Instagram. **`name` di sini sangat
+disarankan**: handle yang sama dengan nama brand belum tentu milik brand itu.
+Contoh nyata saat pengujian — `@kopikenangan` ternyata akun pribadi bernama
+"hey" dengan 4 pengikut. Tanpa `name`, jawabannya `found: true, best_match: 1`.
+
+| Keadaan | Yang terlihat | Jawaban API |
+| ------- | ------------- | ----------- |
+| Akun ada | `statusCode: 0` beserta data profil | `200`, `found: true` |
+| Akun tidak ada / diblokir | `statusCode` `10202` atau `10221` | `200`, `found: false`, `reason` diisi |
+| **Tidak terbaca** | Data profil tidak ada (WAF/captcha) | `503`, `tiktok_blocked` |
+| **Tidak terbaca** | Kode status lain yang belum dikenal | `503`, `tiktok_unreadable` |
+
+TikTok menjawab kode yang sama (`10221`) untuk username yang tidak pernah ada
+dan akun yang diblokir — keduanya `found: false`. Kode yang belum pernah
+terlihat sengaja dijawab *tidak terbaca*, bukan ditebak artinya; pesannya memuat
+kodenya supaya bisa dipelajari.
+
+#### Batasnya
+
+Diuji dari IP residensial: 9 akun (5 ada, 4 fiktif), seluruhnya terjawab benar,
+~1–3,5 detik per akun. **Belum diuji dari IP datacenter**. Kalau `tiktok_blocked`
+mulai sering muncul setelah deploy, langkahnya sama dengan Instagram: turunkan
+`VALIDATION_CONCURRENCY` dulu, lalu proxy residensial di depan sidecar.
+
 ### Website `/api/website`
 
 Memastikan apakah sebuah halaman web hidup, dari URL lengkap maupun nama domain
@@ -664,6 +749,8 @@ sini.
 | `503` | `busy` | Sidecar sedang penuh; ulangi sesuai header `Retry-After` |
 | `503` | `instagram_blocked` | Instagram menolak melayani; ulangi nanti |
 | `503` | `instagram_unreadable` | Profil tidak terbaca dalam batas waktu; ulangi nanti |
+| `503` | `tiktok_blocked` | TikTok tidak menyajikan data profil (WAF/captcha); ulangi nanti |
+| `503` | `tiktok_unreadable` | TikTok menjawab kode status yang belum dikenal; ulangi nanti |
 | `403` | `blocked_address` | URL menunjuk alamat internal; permanen, jangan diulang |
 | `503` | `website_timeout` | Halaman tidak terbuka dalam batas waktu; ulangi nanti |
 | `503` | `website_http_<status>` | Server tujuan menjawab 401/403/429/5xx; ulangi nanti |
@@ -672,7 +759,7 @@ sini.
 | `504` | `timeout` | Scraping melewati batas waktu |
 
 Tempat, akun, atau halaman yang tidak ditemukan **bukan** error: statusnya tetap
-`200` dengan `found: false`. Sebaliknya, kode `instagram_*` dan `website_*` di
+`200` dengan `found: false`. Sebaliknya, kode `instagram_*`, `tiktok_*`, dan `website_*` di
 atas berarti *tidak tahu*, bukan *tidak ada* — jangan pernah menerjemahkannya
 jadi `found: false`.
 
@@ -841,6 +928,11 @@ curl -X POST http://localhost:4000/api/validations \
   -H "content-type: application/json" \
   -d '{"source": "instagram", "queries": ["kournicloud", "natgeo"], "name": "Kurniawan"}'
 
+# batch TikTok
+curl -X POST http://localhost:4000/api/validations \
+  -H "content-type: application/json" \
+  -d '{"source": "tiktok", "queries": ["dicoding", "tiktok.com/@tokopedia"], "name": "Dicoding Indonesia"}'
+
 # batch website
 curl -X POST http://localhost:4000/api/validations \
   -H "content-type: application/json" \
@@ -864,6 +956,7 @@ curl -X POST http://localhost:4000/api/validations \
 | -------- | ------------- | ----------------- |
 | `maps` (default) | Nama tempat, alamat, koordinat, URL Maps | `limit`, `detail`, `lang`, `country` |
 | `instagram` | Username atau URL profil | `name`, `lang`, `country` |
+| `tiktok` | Username, URL profil, atau URL video | `name`, `lang`, `country` |
 | `website` | URL lengkap atau nama domain | `name`, `lang`, `country` |
 | `marketplace` | URL toko Tokopedia/Shopee | `name`, `lang`, `country` |
 
@@ -871,7 +964,7 @@ Satu batch memeriksa satu sumber. Mencampurnya sengaja tidak didukung: opsi tiap
 sumber berbeda, dan yang memanggil endpoint ini biasanya sedang memeriksa satu
 kolom dari satu tabel.
 
-Untuk `instagram` dan `website`, baris yang bentuknya tidak sah ditolak di depan
+Untuk `instagram`, `tiktok`, `website`, dan `marketplace`, baris yang bentuknya tidak sah ditolak di depan
 dengan `422` — bukan diterima lalu gagal satu per satu. Baris seperti itu tidak
 akan pernah berhasil betapa pun sering diulang, jadi memberi tahu sekarang lebih
 jujur daripada membuat klien menunggu hasil polling yang sudah pasti sia-sia.
@@ -883,7 +976,8 @@ per baris.
 
 Bentuk kandidatnya mengikuti sumbernya. Untuk `maps` berisi `place_id`/`cid`/
 `ftid` dan koordinat; untuk `instagram` berisi `username`, `full_name`,
-`profile_url`, `followers`, `verified`, dan `private`; untuk `website` berisi
+`profile_url`, `followers`, `verified`, dan `private`; untuk `tiktok` sama
+ditambah `videos`; untuk `website` berisi
 `url`, `final_url`, `status`, `title`, `description`, `redirected`, dan `parked`;
 untuk `marketplace` berisi `platform`, `slug`, `store_name`, `store_url`, dan —
 khusus Shopee — `shop_id`, `followers`, `items`, `rating`.

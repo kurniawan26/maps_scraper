@@ -30,6 +30,7 @@ defmodule MapsScraper.Subject do
   alias MapsScraper.Instagram
   alias MapsScraper.Maps
   alias MapsScraper.Marketplace
+  alias MapsScraper.TikTok
   alias MapsScraper.Validation.Verdict
   alias MapsScraper.Website
 
@@ -37,6 +38,7 @@ defmodule MapsScraper.Subject do
   @channels [
     {"google_maps_url", :google_maps, Maps},
     {"instagram_url", :instagram, Instagram},
+    {"tiktok_url", :tiktok, TikTok},
     {"website_url", :website, Website},
     {"tokopedia_url", :tokopedia, Marketplace},
     {"shopee_url", :shopee, Marketplace}
@@ -54,6 +56,7 @@ defmodule MapsScraper.Subject do
     * `"name"` — nama usaha. Dipakai membandingkan hasil tiap kanal
     * `"google_maps_url"` — URL Google Maps, juga menerima nama tempat atau alamat
     * `"instagram_url"` — URL profil atau username
+    * `"tiktok_url"` — URL profil TikTok atau username
     * `"website_url"` — URL atau nama domain
     * `"tokopedia_url"` / `"shopee_url"` — URL toko
     * `"lang"` / `"country"` — diteruskan ke tiap kanal
@@ -242,6 +245,13 @@ defmodule MapsScraper.Subject do
     end
   end
 
+  defp check("tiktok_url", query) do
+    case TikTok.normalize_username(query) do
+      {:ok, _username} -> :ok
+      {:error, {:invalid, _field, message}} -> {:error, message}
+    end
+  end
+
   defp check("website_url", query) do
     with {:ok, uri} <- Website.normalize_url(query),
          :ok <- Website.ensure_public(uri) do
@@ -301,7 +311,7 @@ defmodule MapsScraper.Subject do
 
   defp normalize(_), do: nil
 
-  # Satu usaha memakai sampai empat context browser sekaligus (Tokopedia tidak
+  # Satu usaha memakai sampai lima context browser sekaligus (Tokopedia tidak
   # memakai satu pun). Batas ini menjaga satu permintaan tidak menghabiskan
   # seluruh kapasitas sidecar.
   defp max_concurrency do

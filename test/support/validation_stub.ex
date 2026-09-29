@@ -27,6 +27,9 @@ defmodule MapsScraper.ValidationStub do
     * `"blocked"`             — Instagram menolak melayani; kegagalan sementara
       yang harus diulang, bukan "akun tidak ada"
 
+  Dengan `"source" => "tiktok"` bentuknya sama dengan Instagram (`"ok.<username>"`,
+  `"notfound.<username>"`, `"blocked"`), dan `"blocked"` menjadi `tiktok_blocked`.
+
   Dengan `"source" => "website"` query harus berupa URL yang sah:
 
     * `"https://ok.<host>/"`         — halaman hidup
@@ -52,6 +55,7 @@ defmodule MapsScraper.ValidationStub do
   def lookup(%{"query" => query} = params) do
     case params["source"] do
       "instagram" -> instagram(query)
+      "tiktok" -> tiktok(query)
       "website" -> website(query)
       "marketplace" -> marketplace(query)
       _ -> maps(query)
@@ -186,6 +190,51 @@ defmodule MapsScraper.ValidationStub do
       "verified" => false,
       "private" => false,
       "match" => match
+    }
+  end
+
+  defp tiktok("ok." <> username) do
+    {:ok, tiktok_payload(username, found: true)}
+  end
+
+  defp tiktok("notfound." <> username) do
+    {:ok, tiktok_payload(username, found: false)}
+  end
+
+  defp tiktok("blocked") do
+    {:error,
+     {:scraper, 503,
+      %{"code" => "tiktok_blocked", "message" => "TikTok tidak menyajikan data profil"}}}
+  end
+
+  defp tiktok(other), do: maps(other)
+
+  defp tiktok_payload(username, opts) do
+    results =
+      if opts[:found] do
+        [
+          %{
+            "username" => username,
+            "full_name" => String.capitalize(username),
+            "profile_url" => "https://www.tiktok.com/@#{username}",
+            "followers" => 129_700,
+            "videos" => 1361,
+            "verified" => false,
+            "private" => false,
+            "match" => 1
+          }
+        ]
+      else
+        []
+      end
+
+    %{
+      "type" => "profile",
+      "input_type" => "username",
+      "found" => opts[:found],
+      "best_match" => if(opts[:found], do: 1, else: 0),
+      "count" => length(results),
+      "results" => results
     }
   end
 

@@ -97,7 +97,7 @@ defmodule MapsScraper.Validation.Verdict do
 
   # Kandidat dipangkas ke kolom yang dibutuhkan penilai di luar service ini.
   # Bentuknya berbeda per sumber: identitas stabil sebuah tempat adalah
-  # place_id/cid/ftid, sebuah akun Instagram cukup username-nya, dan sebuah
+  # place_id/cid/ftid, sebuah akun Instagram atau TikTok cukup username-nya, dan sebuah
   # halaman web adalah URL-nya.
   defp candidate(store, "marketplace") do
     Map.take(store, ~w(platform slug store_name store_url shop_id followers items rating match))
@@ -109,6 +109,10 @@ defmodule MapsScraper.Validation.Verdict do
 
   defp candidate(profile, "instagram") do
     Map.take(profile, ~w(username full_name profile_url followers verified private match))
+  end
+
+  defp candidate(profile, "tiktok") do
+    Map.take(profile, ~w(username full_name profile_url followers videos verified private match))
   end
 
   defp candidate(place, _source) do

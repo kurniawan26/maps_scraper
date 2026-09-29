@@ -53,6 +53,7 @@ defmodule MapsScraper.SubjectTest do
         "/scrape" => json(payload(true, 1, [place("Warung Sate Pak Budi", 1)])),
         "/scrape/instagram" =>
           json(payload(true, 1, [%{"username" => "warungsate", "match" => 1}])),
+        "/scrape/tiktok" => json(payload(true, 1, [%{"username" => "warungsate", "match" => 1}])),
         "/scrape/website" => json(payload(true, 1, [%{"title" => "Warung Sate", "match" => 1}])),
         "/scrape/marketplace" =>
           json(payload(true, 1, [%{"store_name" => "Warung Sate", "match" => 1}]))
@@ -63,19 +64,21 @@ defmodule MapsScraper.SubjectTest do
           "name" => "Warung Sate Pak Budi",
           "google_maps_url" => "https://maps.app.goo.gl/abc",
           "instagram_url" => "instagram.com/warungsate",
+          "tiktok_url" => "tiktok.com/@warungsate",
           "website_url" => "warungsate.com",
           "tokopedia_url" => "tokopedia.com/warungsate"
         })
 
       assert hasil.name == "Warung Sate Pak Budi"
-      assert hasil.checked == 4
-      assert hasil.found == 4
+      assert hasil.checked == 5
+      assert hasil.found == 5
       assert hasil.errors == 0
-      assert hasil.verdicts == %{match: 4, review: 0, no_match: 0}
+      assert hasil.verdicts == %{match: 5, review: 0, no_match: 0}
 
       assert Map.keys(hasil.channels) |> Enum.sort() == [
                :google_maps,
                :instagram,
+               :tiktok,
                :tokopedia,
                :website
              ]
@@ -181,6 +184,9 @@ defmodule MapsScraper.SubjectTest do
 
       assert {:error, {:invalid, "instagram_url", _}} =
                Subject.validate(%{"instagram_url" => "instagram.com/p/ABC/"})
+
+      assert {:error, {:invalid, "tiktok_url", _}} =
+               Subject.validate(%{"tiktok_url" => "vt.tiktok.com/ZSabc/"})
 
       assert {:error, {:invalid, "website_url", _}} =
                Subject.validate(%{"website_url" => "bukan domain"})

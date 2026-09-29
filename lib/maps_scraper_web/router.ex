@@ -14,6 +14,9 @@ defmodule MapsScraperWeb.Router do
     get "/instagram", InstagramController, :index
     post "/instagram", InstagramController, :index
 
+    get "/tiktok", TikTokController, :index
+    post "/tiktok", TikTokController, :index
+
     get "/website", WebsiteController, :index
     post "/website", WebsiteController, :index
 

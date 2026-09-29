@@ -73,6 +73,14 @@ if instagram_overrides != [] do
   config :maps_scraper, :instagram, instagram_overrides
 end
 
+tiktok_overrides =
+  [timeout: env_int.("TIKTOK_TIMEOUT_MS")]
+  |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+
+if tiktok_overrides != [] do
+  config :maps_scraper, :tiktok, tiktok_overrides
+end
+
 if max_concurrency = env_int.("SUBJECT_MAX_CONCURRENCY") do
   config :maps_scraper, :subject, max_concurrency: max_concurrency
 end

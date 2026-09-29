@@ -2,6 +2,7 @@ import http from 'node:http';
 import { browserMode, browserStats, closeBrowser } from './browser.js';
 import { scrapeProfile } from './instagram.js';
 import { scrapeMarketplace } from './marketplace.js';
+import { scrapeTiktok } from './tiktok.js';
 import { scrapePlace, scrapeSearch } from './maps.js';
 import { scrapeWebsite } from './website.js';
 import {
@@ -10,6 +11,7 @@ import {
   instagramUsername,
   isMapsUrl,
   marketplaceStore,
+  tiktokUsername,
   websiteUrl
 } from './util.js';
 
@@ -165,6 +167,26 @@ async function handleInstagram(req, res) {
   sendJson(res, 200, result);
 }
 
+// TikTok dibaca dari JSON yang tertanam di halaman, bukan dari teks yang
+// berubah mengikuti bahasa — tetapi opsinya disamakan dengan Instagram (en/US)
+// supaya kedua sumber sosial berperilaku sama.
+async function handleTiktok(req, res) {
+  const { payload, query } = await readQuery(req);
+  const username = tiktokUsername(query);
+
+  if (!username) {
+    throw new ScrapeError('Query bukan username maupun URL profil TikTok', {
+      status: 422,
+      code: 'invalid_username'
+    });
+  }
+
+  const options = { ...buildInstagramOptions(payload), query };
+  const result = await withSlot(() => scrapeTiktok(username, options));
+
+  sendJson(res, 200, result);
+}
+
 async function handleMarketplace(req, res) {
   const { payload, query } = await readQuery(req);
   const store = marketplaceStore(query);
@@ -231,6 +253,10 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/scrape/instagram') {
       return await handleInstagram(req, res);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/scrape/tiktok') {
+      return await handleTiktok(req, res);
     }
 
     if (req.method === 'POST' && url.pathname === '/scrape/website') {

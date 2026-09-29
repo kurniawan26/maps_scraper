@@ -26,6 +26,7 @@ defmodule MapsScraper.Validation do
   alias MapsScraper.Maps
   alias MapsScraper.Marketplace
   alias MapsScraper.Repo
+  alias MapsScraper.TikTok
   alias MapsScraper.Validation.Batch
   alias MapsScraper.Validation.Retention
   alias MapsScraper.Validation.Row
@@ -40,6 +41,7 @@ defmodule MapsScraper.Validation do
   @sources %{
     "maps" => Maps,
     "instagram" => Instagram,
+    "tiktok" => TikTok,
     "website" => Website,
     "marketplace" => Marketplace
   }
@@ -49,6 +51,7 @@ defmodule MapsScraper.Validation do
   @option_keys %{
     "maps" => ~w(limit detail lang country name),
     "instagram" => ~w(lang country name),
+    "tiktok" => ~w(lang country name),
     "website" => ~w(lang country name),
     "marketplace" => ~w(lang country name)
   }
@@ -59,7 +62,8 @@ defmodule MapsScraper.Validation do
   Params yang dikenali sama dengan `lookup/1` milik context sumbernya, ditambah:
 
     * `"queries"` — daftar string, wajib
-    * `"source"` — `"maps"` (default), `"instagram"`, atau `"website"`
+    * `"source"` — `"maps"` (default), `"instagram"`, `"tiktok"`, `"website"`,
+      atau `"marketplace"`
 
   Opsi berlaku untuk seluruh baris dalam batch.
   """
@@ -242,6 +246,13 @@ defmodule MapsScraper.Validation do
     case Enum.find(queries, &match?({:error, _}, Instagram.normalize_username(&1))) do
       nil -> {:ok, queries}
       invalid -> {:error, {:invalid, "queries", "#{inspect(invalid)} bukan akun Instagram"}}
+    end
+  end
+
+  defp validate_rows(queries, "tiktok") do
+    case Enum.find(queries, &match?({:error, _}, TikTok.normalize_username(&1))) do
+      nil -> {:ok, queries}
+      invalid -> {:error, {:invalid, "queries", "#{inspect(invalid)} bukan akun TikTok"}}
     end
   end
 

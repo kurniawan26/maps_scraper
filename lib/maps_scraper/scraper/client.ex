@@ -4,7 +4,8 @@ defmodule MapsScraper.Scraper.Client do
 
   Sidecar berjalan sebagai container terpisah (lihat `docker-compose.yml`) dan
   melayani satu endpoint per sumber data: `POST /scrape` untuk Google Maps,
-  `POST /scrape/instagram` untuk profil Instagram. Keduanya berbagi browser,
+  `POST /scrape/instagram` untuk profil Instagram, `POST /scrape/tiktok` untuk
+  profil TikTok, dan seterusnya. Semuanya berbagi browser,
   batas concurrency, dan bentuk error yang sama — karena itu berbagi klien ini
   juga. Yang berbeda hanya isi body dan berapa lama jawabannya ditunggu, dan itu
   ditentukan pemanggil.
