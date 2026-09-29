@@ -39,6 +39,8 @@ defmodule MapsScraper.Validation.Verdict do
       "type" => Map.get(payload, "type"),
       "input_type" => Map.get(payload, "input_type"),
       "count" => Map.get(payload, "count"),
+      "provider" => Map.get(payload, "provider"),
+      "fallback_from" => Map.get(payload, "fallback_from"),
       "candidates" => candidates
     }
   end

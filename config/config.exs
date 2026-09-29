@@ -25,6 +25,14 @@ config :maps_scraper, :instagram,
 
 config :maps_scraper, :tiktok, timeout: 45_000
 
+config :maps_scraper, :apify,
+  enabled: true,
+  token: nil,
+  base_url: "https://api.apify.com",
+  timeout_s: 120,
+  max_charge_usd: 0.5,
+  maps_max_places: 5
+
 config :maps_scraper, :website, timeout: 45_000
 
 config :maps_scraper, Oban,

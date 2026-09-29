@@ -25,6 +25,8 @@ defmodule MapsScraper.TikTok do
   yang diblokir. Keduanya dijawab `found: false`.
   """
 
+  alias MapsScraper.Apify
+  alias MapsScraper.Fallback
   alias MapsScraper.TikTok.Client
 
   @username_format ~r/^[a-z0-9._]{1,30}$/i
@@ -53,9 +55,14 @@ defmodule MapsScraper.TikTok do
   """
   def lookup(params) when is_map(params) do
     with {:ok, query} <- fetch_query(params),
-         {:ok, _username} <- normalize_username(query),
+         {:ok, username} <- normalize_username(query),
          {:ok, opts} <- validate_options(params) do
-      case Client.scrape(query, opts) do
+      Fallback.run(
+        :tiktok,
+        fn -> Client.scrape(query, opts) end,
+        fn -> Apify.TikTok.fetch(username, query, opts) end
+      )
+      |> case do
         {:ok, payload} -> {:ok, Map.put(payload, "input_type", to_string(input_type(query)))}
         {:error, reason} -> {:error, reason}
       end

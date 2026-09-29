@@ -736,6 +736,63 @@ menyeluruh, periksa dulu apakah nama endpoint atau bentuk responsnya berubah —
 itu penyebab yang paling mungkin, dan bukan sesuatu yang bisa dicegah dari sisi
 sini.
 
+### Fallback Apify
+
+Kalau IP sidecar diblokir target, permintaan **Instagram, TikTok, dan Google
+Maps** otomatis dialihkan ke [Apify](https://apify.com) pada request yang sama.
+Berlaku di semua pintu: endpoint langsung, `/api/validate`, dan antrean batch.
+
+| Sumber | Dipicu oleh | Actor Apify | Biaya kira-kira |
+| ------ | ----------- | ----------- | --------------- |
+| Instagram | `instagram_blocked`, `instagram_unreadable` | `apify/instagram-profile-scraper` | ~$0,0026 per akun |
+| TikTok | `tiktok_blocked`, `tiktok_unreadable` | `clockworks/tiktok-profile-scraper` | ~$0,003 per akun |
+| Google Maps | `maps_blocked`, `maps_unreadable` | `compass/crawler-google-places` | ~$0,004 per tempat |
+
+`busy`, `timeout`, dan sidecar mati **tidak** memicu fallback. Itu masalah
+kapasitas atau infrastruktur, bukan IP yang diblokir.
+
+Hasil dari Apify berbentuk sama dengan hasil sidecar, ditambah dua kolom:
+
+```json
+{ "found": true, "best_match": 1, "provider": "apify", "fallback_from": "instagram_blocked", "results": [ … ] }
+```
+
+Hasil dari sidecar membawa `"provider": "sidecar"`. Kedua kolom ini ikut
+tersimpan di hasil antrean dan di tiap kanal `/api/validate`, jadi pemakaian
+Apify bisa dihitung dari datanya.
+
+Aturan "tidak tahu bukan berarti tidak ada" tetap berlaku di Apify:
+
+| Jawaban Apify | Hasil |
+| ------------- | ----- |
+| Profil/tempat ada | `200`, `found: true` |
+| Instagram `error: "not_found"`, TikTok `errorCode: "NOT_FOUND"` | `200`, `found: false` |
+| Pencarian Maps tanpa hasil | `200`, `found: false` |
+| Dataset kosong untuk akun atau URL Maps, galat lain, kuota habis | Galat asli sidecar (`503`) ditambah `fallback_error` |
+
+Kalau Apify juga gagal, yang dikembalikan tetap galat sidecar, sehingga antrean
+mengulangnya:
+
+```json
+{ "error": { "code": "instagram_blocked", "message": "…", "fallback_error": { "code": "apify_http_402", "message": "…" } } }
+```
+
+Akun TikTok yang privat atau tanpa video kemungkinan dijawab dataset kosong
+oleh actor-nya, karena actor itu membaca profil dari video. Kasus ini jatuh ke
+*tidak terbaca*, bukan *tidak ada*. Kasus ini belum diuji.
+
+| Variabel | Default | Keterangan |
+| -------- | ------- | ---------- |
+| `APIFY_TOKEN` | — | Token API Apify. Kosong berarti fallback mati |
+| `APIFY_FALLBACK` | `true` | `false` mematikan fallback walau token ada |
+| `APIFY_TIMEOUT_S` | `120` | Batas waktu satu run, maksimal 300 |
+| `APIFY_MAX_CHARGE_USD` | `0.5` | Batas biaya per run. Actor Maps menolak nilai di bawah `0.5` |
+| `APIFY_MAPS_MAX_PLACES` | `5` | Batas tempat per pencarian Maps (ditagih per tempat) |
+
+Diuji dengan Apify sungguhan (September 2026): akun Instagram dan TikTok yang
+ada maupun fiktif, pencarian teks Maps, dan URL tempat Maps, semuanya terjawab
+benar dalam ~10–30 detik per permintaan.
+
 ### Error
 
 ```json
@@ -750,6 +807,8 @@ sini.
 | `503` | `instagram_blocked` | Instagram menolak melayani; ulangi nanti |
 | `503` | `instagram_unreadable` | Profil tidak terbaca dalam batas waktu; ulangi nanti |
 | `503` | `tiktok_blocked` | TikTok tidak menyajikan data profil (WAF/captcha); ulangi nanti |
+| `503` | `maps_blocked` | Google Maps meminta captcha; ulangi nanti |
+| `503` | `maps_unreadable` | Hasil Maps tidak terbaca dalam batas waktu; ulangi nanti |
 | `503` | `tiktok_unreadable` | TikTok menjawab kode status yang belum dikenal; ulangi nanti |
 | `403` | `blocked_address` | URL menunjuk alamat internal; permanen, jangan diulang |
 | `503` | `website_timeout` | Halaman tidak terbuka dalam batas waktu; ulangi nanti |
@@ -759,7 +818,7 @@ sini.
 | `504` | `timeout` | Scraping melewati batas waktu |
 
 Tempat, akun, atau halaman yang tidak ditemukan **bukan** error: statusnya tetap
-`200` dengan `found: false`. Sebaliknya, kode `instagram_*`, `tiktok_*`, dan `website_*` di
+`200` dengan `found: false`. Sebaliknya, kode `instagram_*`, `tiktok_*`, `maps_*`, dan `website_*` di
 atas berarti *tidak tahu*, bukan *tidak ada* — jangan pernah menerjemahkannya
 jadi `found: false`.
 

@@ -20,6 +20,23 @@ const DETAIL_BUDGET_MS = Number(process.env.DETAIL_BUDGET_MS || 60_000);
 
 const DETAIL_MIN_SLICE_MS = 2_000;
 
+function detectBlock() {
+  if (/\/sorry\//.test(location.pathname)) return true;
+  if (document.querySelector('iframe[src*="recaptcha"], #captcha-form')) return true;
+  const body = document.body ? document.body.innerText.slice(0, 2000) : '';
+  return /unusual traffic|lalu lintas yang tidak biasa|not a robot|bukan robot/i.test(body);
+}
+
+async function assertNotBlocked(page) {
+  const blocked = await page.evaluate(detectBlock).catch(() => false);
+  if (blocked) {
+    throw new ScrapeError('Google Maps meminta verifikasi captcha', {
+      status: 503,
+      code: 'maps_blocked'
+    });
+  }
+}
+
 function normalizeListItem(item) {
   const url = item.url;
   return {
@@ -92,6 +109,7 @@ async function readLoadedPlace(page, { timeout }) {
 
   const raw = await extractWhenStable(page, extractPlace);
   if (!raw.name) {
+    await assertNotBlocked(page);
     throw new ScrapeError('Tempat tidak ditemukan atau halaman tidak dapat dibaca', {
       status: 404,
       code: 'place_not_found'
@@ -145,6 +163,14 @@ export async function scrapeSearch(query, options = {}) {
     });
 
     const state = await waitForSearchState(page, timeout);
+
+    if (state === 'blocked' || state === null) {
+      await assertNotBlocked(page);
+      throw new ScrapeError('Hasil pencarian Google Maps tidak terbaca dalam batas waktu', {
+        status: 503,
+        code: 'maps_unreadable'
+      });
+    }
 
     if (state === 'empty') {
       return { type: 'search', query, found: false, best_match: 0, count: 0, results: [] };
@@ -203,6 +229,8 @@ async function waitForSearchState(page, timeout) {
   const handle = await page
     .waitForFunction(
       () => {
+        if (/\/sorry\//.test(location.pathname)) return 'blocked';
+        if (document.querySelector('iframe[src*="recaptcha"], #captcha-form')) return 'blocked';
         if (document.querySelector('div[role="feed"] a[href*="/maps/place/"]')) return 'feed';
 
         const heading = document.querySelector('h1');

@@ -17,6 +17,11 @@ config :maps_scraper, :scraper,
   timeout: 5_000,
   req_options: [plug: {Req.Test, MapsScraper.Scraper.Client}]
 
+config :maps_scraper, :apify,
+  token: nil,
+  base_url: "http://apify.test",
+  req_options: [plug: {Req.Test, MapsScraper.Apify.Client}]
+
 config :maps_scraper, Oban, testing: :manual
 
 config :maps_scraper, rescue_orphans_on_boot: false

@@ -23,6 +23,9 @@ defmodule MapsScraper.Instagram do
   menampilkan halaman yang sama persis. Ketiganya dijawab `found: false`.
   """
 
+  alias MapsScraper.Apify
+  alias MapsScraper.Fallback
+
   @default_provider MapsScraper.Instagram.Provider.Playwright
 
   @username_format ~r/^[a-z0-9._]{1,30}$/i
@@ -51,9 +54,14 @@ defmodule MapsScraper.Instagram do
   """
   def lookup(params) when is_map(params) do
     with {:ok, query} <- fetch_query(params),
-         {:ok, _username} <- normalize_username(query),
+         {:ok, username} <- normalize_username(query),
          {:ok, opts} <- validate_options(params) do
-      case provider().fetch(query, opts) do
+      Fallback.run(
+        :instagram,
+        fn -> provider().fetch(query, opts) end,
+        fn -> Apify.Instagram.fetch(username, query, opts) end
+      )
+      |> case do
         {:ok, payload} -> {:ok, Map.put(payload, "input_type", to_string(input_type(query)))}
         {:error, reason} -> {:error, reason}
       end

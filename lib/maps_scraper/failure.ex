@@ -18,6 +18,7 @@ defmodule MapsScraper.Failure do
   def retryable?(:unavailable), do: true
   def retryable?({:crashed, _reason}), do: true
   def retryable?({:scraper, status, _error}) when status >= 500, do: true
+  def retryable?({:apify, status, _error}) when status >= 500 or status in [408, 429], do: true
   def retryable?(_reason), do: false
 
   @doc "Apakah kegagalan ini karena sidecar sedang penuh."
@@ -37,6 +38,12 @@ defmodule MapsScraper.Failure do
     do: %{
       "code" => Map.get(error, "code", "scrape_failed"),
       "message" => Map.get(error, "message", "Gagal mengambil data")
+    }
+
+  def describe({:apify, _status, error}),
+    do: %{
+      "code" => Map.get(error, "code", "apify_failed"),
+      "message" => Map.get(error, "message", "Apify gagal")
     }
 
   def describe({:invalid, field, message}),

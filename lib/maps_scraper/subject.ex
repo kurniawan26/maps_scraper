@@ -114,6 +114,8 @@ defmodule MapsScraper.Subject do
       platform: Map.get(payload, "platform"),
       reason: Map.get(payload, "reason"),
       count: Map.get(payload, "count"),
+      provider: Map.get(payload, "provider"),
+      fallback_from: Map.get(payload, "fallback_from"),
       results: results
     }
   end

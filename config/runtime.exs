@@ -51,6 +51,24 @@ if instagram_overrides != [] do
   config :maps_scraper, :instagram, instagram_overrides
 end
 
+apify_overrides =
+  [
+    token: System.get_env("APIFY_TOKEN"),
+    enabled:
+      case System.get_env("APIFY_FALLBACK") do
+        nil -> nil
+        value -> String.downcase(String.trim(value)) not in ["false", "0", "off", ""]
+      end,
+    timeout_s: env_int.("APIFY_TIMEOUT_S"),
+    max_charge_usd: env_float.("APIFY_MAX_CHARGE_USD"),
+    maps_max_places: env_int.("APIFY_MAPS_MAX_PLACES")
+  ]
+  |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+
+if apify_overrides != [] do
+  config :maps_scraper, :apify, apify_overrides
+end
+
 tiktok_overrides =
   [timeout: env_int.("TIKTOK_TIMEOUT_MS")]
   |> Enum.reject(fn {_key, value} -> is_nil(value) end)

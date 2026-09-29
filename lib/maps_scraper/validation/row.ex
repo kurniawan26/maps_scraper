@@ -57,6 +57,8 @@ defmodule MapsScraper.Validation.Row do
       type: result["type"],
       input_type: result["input_type"],
       count: result["count"],
+      provider: result["provider"],
+      fallback_from: result["fallback_from"],
       candidates: Enum.map(result["candidates"] || [], &atomize/1)
     }
   end

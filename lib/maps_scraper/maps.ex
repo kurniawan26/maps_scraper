@@ -6,6 +6,8 @@ defmodule MapsScraper.Maps do
   Google Maps — memvalidasinya, lalu meneruskannya ke sidecar Playwright.
   """
 
+  alias MapsScraper.Apify
+  alias MapsScraper.Fallback
   alias MapsScraper.Maps.Client
 
   @short_link_hosts ["maps.app.goo.gl", "goo.gl", "g.co"]
@@ -37,7 +39,12 @@ defmodule MapsScraper.Maps do
   def lookup(params) when is_map(params) do
     with {:ok, query} <- fetch_query(params),
          {:ok, opts} <- validate_options(params) do
-      case Client.scrape(query, opts) do
+      Fallback.run(
+        :maps,
+        fn -> Client.scrape(query, opts) end,
+        fn -> Apify.Maps.fetch(query, input_type(query), opts) end
+      )
+      |> case do
         {:ok, payload} -> {:ok, Map.put(payload, "input_type", to_string(input_type(query)))}
         {:error, reason} -> {:error, reason}
       end
